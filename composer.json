@@ -1,0 +1,37 @@
+{
+    "name": "componenta/validation",
+    "description": "Flexible validation library with attribute-based rules, multiple provider strategies, and comprehensive error handling",
+    "type": "library",
+    "license": "MIT",
+    "keywords": [
+        "validation",
+        "validator",
+        "attributes",
+        "rules",
+        "validation-provider",
+        "php84"
+    ],
+    "require": {
+        "php": "^8.4",
+        "componenta/arrayable": "^1.0",
+        "componenta/config": "^1.0",
+        "componenta/mimetype-detector": "^1.0",
+        "cycle/database": "^2.15",
+        "psr/container": "^2.0",
+        "psr/http-message": "^2.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "Componenta\\Validation\\": "src/"
+        }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true,
+    "extra": {
+        "componenta": {
+            "config-providers": [
+                "Componenta\\Validation\\ConfigProvider"
+            ]
+        }
+    }
+}
