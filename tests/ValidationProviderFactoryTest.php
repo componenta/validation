@@ -38,7 +38,8 @@ final class DevelopmentOnlyValidatorFixture implements ValidatorInterface
     }
 }
 
-function validationFactoryContainer(string $environment): ContainerInterface
+/** @param array<string, mixed> $environment */
+function validationFactoryContainer(array $environment): ContainerInterface
 {
     $validator = new DevelopmentOnlyValidatorFixture();
     $validatorFactory = new class () implements ValidatorFactoryInterface {
@@ -53,7 +54,7 @@ function validationFactoryContainer(string $environment): ContainerInterface
         }
     };
     $entries = [
-        ConfigKey::CONFIG => new Config([], new Environment(['APP_ENV' => $environment])),
+        ConfigKey::CONFIG => new Config([], new Environment($environment)),
         ValidatorFactoryInterface::class => $validatorFactory,
         RuleFactoryInterface::class => new RuleFactory(),
         DevelopmentOnlyValidatorFixture::class => $validator,
@@ -74,19 +75,29 @@ function validationFactoryContainer(string $environment): ContainerInterface
     };
 }
 
-it('keeps attribute validation available in production', function () {
-    $provider = (new ValidationProviderFactory())(validationFactoryContainer('production'));
+it('preserves APP_ENV-only attribute validation behavior', function () {
+    $provider = (new ValidationProviderFactory())(validationFactoryContainer(['APP_ENV' => 'production']));
 
     expect($provider->provide(ProductionAttributeValidationFixture::class))
         ->toBeInstanceOf(ValidatorInterface::class);
 });
 
-it('keeps dynamic ValidatedBy lookup available in every environment', function () {
-    $production = (new ValidationProviderFactory())(validationFactoryContainer('production'));
-    $development = (new ValidationProviderFactory())(validationFactoryContainer('development'));
+it('preserves APP_ENV-only dynamic ValidatedBy lookup behavior', function () {
+    $production = (new ValidationProviderFactory())(validationFactoryContainer(['APP_ENV' => 'production']));
+    $development = (new ValidationProviderFactory())(validationFactoryContainer(['APP_ENV' => 'development']));
 
     expect($production->provide(DevelopmentValidatedByFixture::class))
         ->toBeInstanceOf(ValidatorInterface::class)
         ->and($development->provide(DevelopmentValidatedByFixture::class))
         ->toBeInstanceOf(ValidatorInterface::class);
+});
+
+it('keeps reflection providers disabled by the production flag', function () {
+    $provider = (new ValidationProviderFactory())(validationFactoryContainer([
+        'APP_ENV' => 'production',
+        'production' => true,
+    ]));
+
+    expect($provider->provide(ProductionAttributeValidationFixture::class))->toBeNull()
+        ->and($provider->provide(DevelopmentValidatedByFixture::class))->toBeNull();
 });
