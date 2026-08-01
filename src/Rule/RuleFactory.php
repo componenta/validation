@@ -2,7 +2,6 @@
 
 namespace Componenta\Validation\Rule;
 
-use Closure;
 use Componenta\Detector\MimeTypeDetectorInterface;
 use Componenta\Validation\ContextInterface;
 use Cycle\Database\DatabaseInterface;
@@ -35,15 +34,11 @@ final class RuleFactory implements RuleFactoryInterface
     private array $aliases = [];
     /** @var array<string, true> Rules whose parameters are nested rules, not plain strings. */
     private array $compositeRules = [];
-    private DatabaseInterface|Closure|null $database;
-    private MimeTypeDetectorInterface|Closure|null $detector;
 
     public function __construct(
-        DatabaseInterface|Closure|null $database = null,
-        MimeTypeDetectorInterface|Closure|null $detector = null,
+        private readonly ?DatabaseInterface $database = null,
+        private readonly ?MimeTypeDetectorInterface $detector = null,
     ) {
-        $this->database = $database;
-        $this->detector = $detector;
         $this->registerDefaults();
     }
 
@@ -513,7 +508,7 @@ final class RuleFactory implements RuleFactoryInterface
         if ($this->detector !== null) {
             $this->factories['mime_type'] = fn(array $p) => empty($p)
                 ? throw new InvalidArgumentException('mime_type requires at least one type')
-                : new MimeType($this->detector(), $p);
+                : new MimeType($this->detector, $p);
         }
 
         $this->factories['file'] = function (array $p): RuleInterface {
@@ -529,7 +524,7 @@ final class RuleFactory implements RuleFactoryInterface
             );
 
             if ($mimeTypes !== [] && $this->detector !== null) {
-                $rules[] = new MimeType($this->detector(), array_values($mimeTypes));
+                $rules[] = new MimeType($this->detector, array_values($mimeTypes));
             }
 
             return count($rules) === 1 ? $rules[0] : new AllOf(...$rules);
@@ -538,55 +533,17 @@ final class RuleFactory implements RuleFactoryInterface
         // Database
         if ($this->database !== null) {
             $this->factories['exists'] = fn(array $p) => new Exists(
-                $this->database(),
+                $this->database,
                 (string) ($p[0] ?? throw new InvalidArgumentException('exists requires table')),
                 (string) ($p[1] ?? 'id'),
             );
 
             $this->factories['unique'] = fn(array $p) => new Unique(
-                $this->database(),
+                $this->database,
                 (string) ($p[0] ?? throw new InvalidArgumentException('unique requires table')),
                 (string) ($p[1] ?? 'id'),
             );
         }
-    }
-
-    private function database(): DatabaseInterface
-    {
-        if ($this->database instanceof Closure) {
-            $database = ($this->database)();
-
-            if (!$database instanceof DatabaseInterface) {
-                throw new InvalidArgumentException(sprintf(
-                    'Database resolver must return %s; got %s.',
-                    DatabaseInterface::class,
-                    get_debug_type($database),
-                ));
-            }
-
-            $this->database = $database;
-        }
-
-        return $this->database ?? throw new InvalidArgumentException('Database is not configured.');
-    }
-
-    private function detector(): MimeTypeDetectorInterface
-    {
-        if ($this->detector instanceof Closure) {
-            $detector = ($this->detector)();
-
-            if (!$detector instanceof MimeTypeDetectorInterface) {
-                throw new InvalidArgumentException(sprintf(
-                    'MIME type detector resolver must return %s; got %s.',
-                    MimeTypeDetectorInterface::class,
-                    get_debug_type($detector),
-                ));
-            }
-
-            $this->detector = $detector;
-        }
-
-        return $this->detector ?? throw new InvalidArgumentException('MIME type detector is not configured.');
     }
 
     private function toNumber(string $value): int|float
