@@ -7,21 +7,24 @@ namespace Componenta\Validation\Factory;
 use Componenta\Config\Config;
 use Componenta\Validation\ConfigKey;
 use Componenta\Validation\Provider\AttributeValidationProvider;
+use Componenta\Validation\Provider\CompiledAttributeValidationProvider;
 use Componenta\Validation\Provider\CompositeValidationProvider;
 use Componenta\Validation\Provider\MappedValidationProvider;
 use Componenta\Validation\Provider\ValidatableProvider;
 use Componenta\Validation\Provider\ValidatedByProvider;
 use Componenta\Validation\Rule\RuleFactoryInterface;
+use Componenta\Validation\ValidatorInterface;
 use Psr\Container\ContainerExceptionInterface;
 use Psr\Container\ContainerInterface;
 use Psr\Container\NotFoundExceptionInterface;
+use UnexpectedValueException;
 
 /**
  * Factory for creating composite validation provider.
  *
- * Creates provider chain with different strategies based on environment.
- * In development mode includes attribute scanning providers for convenience.
- * In production mode uses only explicitly registered validators for performance.
+ * Explicit, Validatable, and #[Validate] strategies are available in every
+ * environment. Development additionally enables dynamic #[ValidatedBy]
+ * lookup; production keeps that convention out of the hot path.
  */
 final readonly class ValidationProviderFactory
 {
@@ -35,32 +38,87 @@ final readonly class ValidationProviderFactory
      */
     public function __invoke(ContainerInterface $container): CompositeValidationProvider
     {
-        /** @var Config $config */
         $config = $container->get(ConfigKey::CONFIG);
+        $validatorFactory = $container->get(ValidatorFactoryInterface::class);
+        $ruleFactory = $container->get(RuleFactoryInterface::class);
 
-        $devMode = !$config?->environment->bool('production', false) ?? true;
+        if (!$config instanceof Config) {
+            throw self::invalidEntry(ConfigKey::CONFIG, Config::class, $config);
+        }
+
+        if (!$validatorFactory instanceof ValidatorFactoryInterface) {
+            throw self::invalidEntry(
+                ValidatorFactoryInterface::class,
+                ValidatorFactoryInterface::class,
+                $validatorFactory,
+            );
+        }
+
+        if (!$ruleFactory instanceof RuleFactoryInterface) {
+            throw self::invalidEntry(
+                RuleFactoryInterface::class,
+                RuleFactoryInterface::class,
+                $ruleFactory,
+            );
+        }
+
+        $devMode = $config->environment?->match(
+            'APP_ENV',
+            'development',
+            'development',
+        ) ?? true;
+
+        $attributeProvider = new AttributeValidationProvider($validatorFactory, $ruleFactory);
+        $compiledPlans = $config->array(ConfigKey::ATTRIBUTE_PLANS, []);
+
+        if ($compiledPlans !== []) {
+            $attributeProvider = new CompiledAttributeValidationProvider(
+                $validatorFactory,
+                $ruleFactory,
+                $compiledPlans,
+                $attributeProvider,
+            );
+        }
 
         $provider = new CompositeValidationProvider(
-            new ValidatableProvider($container->get(ValidatorFactoryInterface::class)),
-            $mappedProvider = new MappedValidationProvider($container)
+            new ValidatableProvider($validatorFactory),
+            $mappedProvider = new MappedValidationProvider($container),
+            $attributeProvider,
         );
 
-        // Register static mappings from configuration
+        // Register static mappings from configuration.
         foreach ($config->array(ConfigKey::VALIDATORS_MAP, []) as $entry => $validator) {
+            if (!is_string($entry)
+                || !is_string($validator)
+                || !is_a($validator, ValidatorInterface::class, true)
+            ) {
+                throw new UnexpectedValueException(sprintf(
+                    'Validation map must contain class-string keys and %s class-string values.',
+                    ValidatorInterface::class,
+                ));
+            }
+
             $mappedProvider->register($entry, $validator);
         }
 
-        // Add attribute-based providers in development mode
+        // Dynamic class-to-validator lookup is a development convenience.
         if ($devMode) {
-            $provider->add(
-                new AttributeValidationProvider(
-                    $container->get(ValidatorFactoryInterface::class),
-                    $container->get(RuleFactoryInterface::class))
-            );
-
             $provider->add(new ValidatedByProvider($container));
         }
 
         return $provider;
+    }
+
+    private static function invalidEntry(
+        string $id,
+        string $expected,
+        mixed $entry,
+    ): UnexpectedValueException {
+        return new UnexpectedValueException(sprintf(
+            'Container entry "%s" must implement %s; got %s.',
+            $id,
+            $expected,
+            get_debug_type($entry),
+        ));
     }
 }

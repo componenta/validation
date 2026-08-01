@@ -6,6 +6,8 @@ class ConfigKey extends \Componenta\Config\ConfigKey
 {
     public const string VALIDATORS_MAP = 'VALIDATION_VALIDATORS_MAP';
 
+    public const string ATTRIBUTE_PLANS = 'VALIDATION_ATTRIBUTE_PLANS';
+
     public const string DICTIONARY = 'VALIDATION_DICTIONARY';
 
     public const string LOCALE_EN = 'en_US';
