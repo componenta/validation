@@ -22,9 +22,7 @@ use UnexpectedValueException;
 /**
  * Factory for creating composite validation provider.
  *
- * Explicit, Validatable, and #[Validate] strategies are available in every
- * environment. Development additionally enables dynamic #[ValidatedBy]
- * lookup; production keeps that convention out of the hot path.
+ * Explicit, Validatable, #[Validate], and #[ValidatedBy] strategies are available in every environment.
  */
 final readonly class ValidationProviderFactory
 {
@@ -62,11 +60,6 @@ final readonly class ValidationProviderFactory
             );
         }
 
-        $devMode = $config->environment?->match(
-            'APP_ENV',
-            'development',
-            'development',
-        ) ?? true;
 
         $attributeProvider = new AttributeValidationProvider($validatorFactory, $ruleFactory);
         $compiledPlans = $config->array(ConfigKey::ATTRIBUTE_PLANS, []);
@@ -101,10 +94,7 @@ final readonly class ValidationProviderFactory
             $mappedProvider->register($entry, $validator);
         }
 
-        // Dynamic class-to-validator lookup is a development convenience.
-        if ($devMode) {
-            $provider->add(new ValidatedByProvider($container));
-        }
+        $provider->add(new ValidatedByProvider($container));
 
         return $provider;
     }

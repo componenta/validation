@@ -81,11 +81,12 @@ it('keeps attribute validation available in production', function () {
         ->toBeInstanceOf(ValidatorInterface::class);
 });
 
-it('enables dynamic ValidatedBy lookup only in development', function () {
+it('keeps dynamic ValidatedBy lookup available in every environment', function () {
     $production = (new ValidationProviderFactory())(validationFactoryContainer('production'));
     $development = (new ValidationProviderFactory())(validationFactoryContainer('development'));
 
-    expect($production->provide(DevelopmentValidatedByFixture::class))->toBeNull()
+    expect($production->provide(DevelopmentValidatedByFixture::class))
+        ->toBeInstanceOf(ValidatorInterface::class)
         ->and($development->provide(DevelopmentValidatedByFixture::class))
         ->toBeInstanceOf(ValidatorInterface::class);
 });
