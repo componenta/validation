@@ -75,12 +75,9 @@ final readonly class AttributeValidationPlanCompiler
         }
 
         foreach ($property->getAttributes(Validate::class) as $attribute) {
-            $arguments = $attribute->getArguments();
-            $rules = $arguments['rules'] ?? $arguments[0] ?? null;
-
-            if (is_string($rules)) {
-                $descriptors[] = ['type' => 'definition', 'rules' => $rules];
-            }
+            /** @var Validate $validate */
+            $validate = $attribute->newInstance();
+            $descriptors[] = ['type' => 'definition', 'rules' => $validate->rules];
         }
 
         foreach ($property->getAttributes(RuleAttribute::class, ReflectionAttribute::IS_INSTANCEOF) as $attribute) {
@@ -98,18 +95,16 @@ final readonly class AttributeValidationPlanCompiler
     {
         $field = $property->getAttributes(Field::class)[0] ?? null;
         if ($field !== null) {
-            $arguments = $field->getArguments();
-            $name = $arguments['name'] ?? $arguments[0] ?? null;
-            if (is_string($name)) {
-                return $name;
-            }
+            /** @var Field $fieldAttribute */
+            $fieldAttribute = $field->newInstance();
+            return $fieldAttribute->name;
         }
 
         foreach ($property->getAttributes(Validate::class) as $attribute) {
-            $arguments = $attribute->getArguments();
-            $name = $arguments['as'] ?? $arguments[1] ?? null;
-            if (is_string($name)) {
-                return $name;
+            /** @var Validate $validate */
+            $validate = $attribute->newInstance();
+            if ($validate->as !== null) {
+                return $validate->as;
             }
         }
 
