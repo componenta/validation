@@ -1,6 +1,6 @@
 # Componenta Validation
 
-Validation library for PHP 8.4+. The package provides validators, rule composition, string rule syntax, property attributes, mapped validators, immutable validation context, localized messages, and factories for framework integration.
+Validation library for PHP 8.4+. It provides immutable validators, composable rules, attribute metadata, mapped validators, localized messages, nested and wildcard field paths, and framework-neutral factories.
 
 ## Installation
 
@@ -8,41 +8,24 @@ Validation library for PHP 8.4+. The package provides validators, rule compositi
 composer require componenta/validation
 ```
 
-The Composer package installs the dependencies needed by all bundled rules. When
-the package is wired through `Componenta\Validation\ConfigProvider`, the
-container must provide `Cycle\Database\DatabaseInterface` and
-`Componenta\Detector\MimeTypeDetectorInterface`, because the default rule factory
-is built with database and MIME support.
+For Componenta application discovery and production compilation of validation attributes, also install:
 
-If you instantiate `Componenta\Validation\Rule\RuleFactory` manually, both
-dependencies are optional constructor arguments. Passing `null` disables the
-rules that need that dependency:
+```bash
+composer require componenta/validation-app
+```
 
-- `exists` and `unique` are registered only when a database is available;
-- `mime_type` and MIME checks inside `file` are registered only when a detector is available;
-- framework registration is provided by `Componenta\Validation\ConfigProvider`.
+The core package can be used without `componenta/app` or `componenta/validation-app`.
 
-## Related Packages
-
-| Package | Why it matters here |
-|---|---|
-| `componenta/di` | Creates validators/rules through ordinary callable factories and is commonly used with request DTO mapping. |
-| `cycle/database` | Provides `Cycle\Database\DatabaseInterface` for database-backed `exists` and `unique` rules. |
-| `componenta/mimetype-detector` | Provides `MimeTypeDetectorInterface` for MIME/file rules when MIME type should be detected from bytes or files. |
-| `componenta/config` | Registers validator factories, message dictionaries, and locales in framework applications. |
-| `psr/http-message` | HTTP applications often supply PSR-7 request data before validation, although validation itself is transport-neutral. |
-
-## Quick Start
+## Quick start
 
 ```php
 use Componenta\Validation\Rule\RuleFactory;
 use Componenta\Validation\Validator;
 
-$ruleFactory = new RuleFactory();
-
+$rules = new RuleFactory();
 $validator = new Validator([
-    'email' => $ruleFactory->createRule('required|email|length:5,255'),
-    'age' => $ruleFactory->createRule('int|range:18,120'),
+    'email' => $rules->createRule('required|email|length:5,255'),
+    'age' => $rules->createRule('int|range:18,120'),
 ]);
 
 $result = $validator->validate([
@@ -55,8 +38,7 @@ if ($result !== true) {
 }
 ```
 
-In a framework application, inject `ValidatorFactoryInterface` and call
-`createFrom()` with an array of field names to rule definitions:
+When the package is wired through its `ConfigProvider`, inject `ValidatorFactoryInterface`:
 
 ```php
 $validator = $factory->createFrom([
@@ -64,131 +46,36 @@ $validator = $factory->createFrom([
 ]);
 ```
 
-A standalone string rule is not a validator definition.
+`ValidatorInterface::validate()` accepts any iterable. The implementation materializes it once, so arrays, rewindable iterators, and one-shot generators have the same validation semantics. The return value is `true` or `ErrorMessageCollectorInterface`; `ContextInterface::THROW_ON_FAILURE_ATTRIBUTE` changes failures into `ValidationException`.
 
-## Validator Contract
+## Optional services
 
-`ValidatorInterface::validate(iterable $data, ?ContextInterface $context = null)` returns:
+Database and MIME support are optional. The default DI factory uses these services only when the container has them:
 
-- `true` when validation passes;
-- `ErrorMessageCollectorInterface` when validation fails.
+- `Cycle\Database\DatabaseInterface` enables `exists` and `unique`;
+- `Componenta\Detector\MimeTypeDetectorInterface` enables `mime_type` and MIME restrictions in `file`.
 
-When `ContextInterface::THROW_ON_FAILURE_ATTRIBUTE` is `true`, validation
-throws `ValidationException` instead of returning the collector.
+All other bundled rules remain available without either service. A manually created `RuleFactory` accepts the same dependencies as nullable constructor arguments.
 
-```php
-$result = $validator->validate(['email' => 'invalid']);
+The `phone` rule is part of the core package. Its `giggsey/libphonenumber-for-php` runtime dependency is declared by `componenta/validation`.
 
-if ($result !== true) {
-    $result->has('email');
-    $result->get('email');
-    $result->toArray();
-}
-```
+## Field paths and missing values
 
-`Validator` is immutable. Methods such as `withRules()`, `withWalker()`, `withFormatter()`, and `withLocale()` return new validators.
-
-## Field Paths And Wildcards
-
-Rules are keyed by field path. Nested arrays use dot notation. Wildcards validate every element at that level.
+Rules are keyed by field path. Dot notation addresses nested values and `*` addresses every existing collection item:
 
 ```php
 $validator = $factory->createFrom([
-    'user.email' => 'required|email',
-    'users.*.email' => 'required|email',
-    'tags.*' => 'string|length:1,50',
+    'profile.email' => 'required|email',
+    'items.*.sku' => 'required|string',
+    'items.*.tags.*' => 'string|length:1,50',
 ]);
 ```
 
-The walker reports errors under fully qualified paths, for example `users.0.email`.
+Missing nested leaves are validated as `null`. For example, `profile.email` fails `required` when `profile` or `email` is absent. For `items.*.sku`, every existing item receives its own missing-field target when `sku` is absent.
 
-## Rule Syntax
+## Attributes
 
-Rules are created by `RuleFactoryInterface`.
-
-```php
-$ruleFactory->createRule('email');
-$ruleFactory->createRule('required|email|length:5,255');
-$ruleFactory->createRule('nullable|email');
-$ruleFactory->createRule('oneof:email,phone');
-```
-
-Syntax:
-
-- `name`
-- `name:param1,param2`
-- `ruleA|ruleB|ruleC`
-- `regex:/^\d+$/`
-
-Pipe-separated rules are wrapped in `AllOf`: every rule must pass. `nullable|...` is special: `null` passes immediately; non-null values must pass the remaining rules.
-
-Composite string rules (`allof`, `oneof`, `arrayof`) parse their parameters as nested rule definitions. Other rules treat parameters as plain strings.
-
-## Built-In Rules
-
-| Rule | Parameters | Meaning |
-|---|---|---|
-| `required` | none | Value must be present and non-empty. |
-| `nullable` | none | Null is accepted. |
-| `filled` | none | Present value must not be empty. |
-| `accepted` | none | Accepts common truthy consent values. |
-| `in` | `value,...` | Value must be one of the listed values. |
-| `not_in` | `value,...` | Value must not be one of the listed values. |
-| `string` | none | Value must be string. |
-| `int`, `integer` | `strict?` | Integer check, optionally strict. |
-| `array` | `list?` | Array check, optionally list-like. |
-| `numeric` | none | Numeric value. |
-| `boolean`, `bool` | `strict?` | Boolean check, optionally strict. |
-| `email` | none | Email address. |
-| `url` | `scheme,...?` | URL, optionally restricted to schemes. |
-| `regex` | `pattern` | Regular expression match. |
-| `uuid` | `version?` | UUID, optionally specific version. |
-| `alpha` | `ascii?` | Letters only. |
-| `alpha_num` | `ascii?` | Letters and digits. |
-| `alpha_dash` | `ascii?` | Letters, digits, dash and underscore. |
-| `length` | `min?,max?` | String length bounds. |
-| `phone` | `region?` | Phone number validation. |
-| `range` | `min?,max?` | Numeric range. |
-| `min` | `min` | Numeric lower bound. |
-| `max` | `max` | Numeric upper bound. |
-| `positive` | `orZero?` | Positive number. |
-| `negative` | `orZero?` | Negative number. |
-| `equals` | `field,strict?` | Equals another field. |
-| `not_equals` | `field,strict?` | Does not equal another field. |
-| `gt`, `gte` | `field` | Greater than / greater than or equal to another field. |
-| `lt`, `lte` | `field` | Less than / less than or equal to another field. |
-| `confirmed` | `suffix?` | Matches confirmation field. |
-| `date` | none | Date-like value. |
-| `date_format` | `format` | Date in exact format. |
-| `before` | `date,orEqual?,graceMinutes?` | Date before target. |
-| `before_or_equal` | `date,graceMinutes?` | Date before or equal to target. |
-| `after` | `date,orEqual?,graceMinutes?` | Date after target. |
-| `after_or_equal` | `date,graceMinutes?` | Date after or equal to target. |
-| `count` | `min?,max?` | Array/countable size. |
-| `distinct` | `field?` | Array values are distinct. |
-| `required_if` | `field,value` | Required when another field equals value. |
-| `required_with` | `field,...` | Required when any listed field is present. |
-| `required_without` | `field,...` | Required when listed fields are absent. |
-| `prohibited_if` | `field,value` | Must be absent when condition matches. |
-| `exclude_if` | `field,value` | Excludes value when condition matches. |
-| `when` | `field:value,then,else?` | Conditional nested rules. |
-| `password` | `min?,flags?,confirmation?` | Password complexity rule. |
-| `uploaded_file` | none | PSR uploaded file. |
-| `file_size` | `max,min?` | Uploaded file size. |
-| `mime_type` | `type,...` | MIME type through detector. |
-| `file` | `max?,mime,...` | Combined uploaded file checks. |
-| `exists` | `table,column?` | Database existence. |
-| `unique` | `table,column?` | Database uniqueness. |
-| `allof` | `rule,...` | Every nested rule must pass. |
-| `oneof` | `rule,...` | At least one nested rule must pass. |
-| `arrayof` | `rule` | Every array item must pass the nested rule. |
-| `ifthen` | programmatic use | Conditional rule class for callable conditions. Plain string definitions cannot express the callable condition safely. |
-
-## Attribute Validation
-
-`AttributeValidationProvider` builds validators from class property attributes.
-The attribute classes are also allowed on parameters so other framework layers
-can reuse the same metadata, but this provider itself scans properties only.
+`AttributeValidationProvider` builds validator definitions from property attributes in development:
 
 ```php
 use Componenta\Validation\Attribute\Field;
@@ -210,48 +97,80 @@ final class CreateUserCommand
 }
 ```
 
-Field name resolution order:
+The field-name priority is:
 
-1. `#[Field('name')]`
-2. `#[Validate(..., as: 'name')]`
-3. PHP property name
+1. `#[Field('name')]`;
+2. `#[Validate(..., as: 'name')]`;
+3. the PHP property name.
 
-Attribute types:
+Direct rule attributes are instantiated as rules. `RuleAttribute` subclasses such as `#[Exists]`, `#[Unique]`, and `#[When]` are hydrated through `RuleFactoryInterface`, so service-backed rules receive their configured dependencies.
 
-| Attribute | Target | Meaning |
-|---|---|---|
-| `#[Validate]` | property, parameter | String rule definition. `AttributeValidationProvider` reads it from properties. |
-| `#[Field]` | property, parameter | Override validation field name. `AttributeValidationProvider` reads it from properties. |
-| `#[ValidatedBy]` | class | Link class to validator class. |
-| `#[Exists]` | property, parameter | Database exists rule metadata. |
-| `#[Unique]` | property, parameter | Database unique rule metadata. |
-| `#[When]` | property, parameter, repeatable | Conditional rule metadata. |
-| direct rule attributes | property, parameter | Rule objects instantiated directly. |
+A class may delegate validation to a validator service:
 
-Rules requiring services should use `RuleAttribute` subclasses so the real rule is built by `RuleFactory`.
+```php
+use Componenta\Validation\Attribute\ValidatedBy;
 
-## Validation Providers
+#[ValidatedBy(CreateUserValidator::class)]
+final class CreateUserCommand
+{
+}
+```
 
-`ValidationProviderInterface` resolves validators by entry id, usually class name.
+The referenced identifier is resolved through `ValidatorFactoryInterface::create()`, normally from the container. It may therefore use an explicit factory, an autowired concrete validator, or an interface/service identifier mapped by the application. Declaring `#[ValidatedBy]` together with property validation rules is ambiguous and is rejected instead of silently choosing one source.
 
-| Provider | Source |
-|---|---|
-| `ValidatableProvider` | `ValidatableInterface::createValidator()`. |
-| `MappedValidationProvider` | `ConfigKey::VALIDATORS_MAP`. |
-| `AttributeValidationProvider` | Property attributes. |
-| `ValidatedByProvider` | `#[ValidatedBy]`. |
-| `CompositeValidationProvider` | Tries providers in order. |
+## Development and production providers
 
-`ValidationProviderFactory` builds different chains:
+The default provider order preserves explicit application configuration:
 
-- development: validatable, mapped, attribute, validated-by;
-- production: validatable and mapped.
+1. `ValidatableProvider` for `ValidatableInterface`;
+2. `MappedValidationProvider` for `ConfigKey::VALIDATORS_MAP`;
+3. `CompiledValidationProvider` for `ConfigKey::COMPILED_VALIDATORS`;
+4. reflection-based attribute discovery in development only.
 
-Reflection-based attribute provider is excluded from production by default.
+`VALIDATORS_MAP` remains the manual map from entry id to a validator service. `COMPILED_VALIDATORS` is a versioned descriptor map produced by the application integration; it is not a map of generated validator classes.
 
-## Custom Rules
+With `componenta/validation-app`, `app:build` scans attribute metadata in development and stores a descriptor map in the application config cache. In production the compiled provider hydrates rules and delegates creation to the ordinary `ValidatorFactoryInterface`, so the standard walker, formatter, locale, custom rule factory, and explicit container factories continue to apply. Validator services referenced by `#[ValidatedBy]` are also contributed as DI v4 autowiring roots. Explicit application factories still win over generated DI factories.
 
-Rules implement `RuleInterface`.
+The integration marks the compiled map as required outside development. A missing or incompatible map fails during provider construction rather than silently disabling attribute validation. Re-run `app:build` whenever validation attributes, validator services, rule aliases, or their dependencies change.
+
+## Rule syntax
+
+`RuleFactoryInterface` supports:
+
+```php
+$rules->createRule('email');
+$rules->createRule('required|email|length:5,255');
+$rules->createRule('nullable|email');
+$rules->createRule('oneof:email,phone');
+$rules->createRule('arrayof:uuid');
+```
+
+Pipe-separated definitions are composed with `AllOf`. A nullable member is composed through the same nullable-aware helper used by attributes and programmatic rule collections, so equivalent construction paths have equivalent behavior.
+
+`ifthen` is not a string alias because a safe string grammar cannot represent an arbitrary callable condition. Use the declarative `when` rule, `#[When]`, or construct `IfThen` programmatically.
+
+## Built-in rules
+
+The package includes required/optional, scalar type, string, numeric, comparison, date, array, conditional, password, upload, database, and composite rules. Common names include:
+
+```text
+required, nullable, filled, accepted
+string, int, array, numeric, boolean
+email, url, regex, uuid, alpha, alpha_num, alpha_dash, length, phone
+range, min, max, positive, negative
+confirmed, equals, not_equals, gt, gte, lt, lte
+date, date_format, before, before_or_equal, after, after_or_equal
+count, distinct, required_if, required_with, required_without
+prohibited_if, exclude_if, when, password
+uploaded_file, file_size, mime_type, file
+exists, unique, allof, oneof, arrayof
+```
+
+`OneOf` always evaluates alternatives until one succeeds. `STOP_ON_FIRST_FAILURE_ATTRIBUTE` controls only which errors are retained when every alternative fails; it does not change logical truth. Composite predicate methods evaluate children through `RuleInterface::validate()`, so custom rules need only implement the published interface.
+
+The stock `file` rule validates upload status before size or MIME access. `MimeType` rejects failed uploads without calling `getStream()`.
+
+## Custom rules
 
 ```php
 use Componenta\Validation\ContextInterface;
@@ -266,88 +185,35 @@ final class Uppercase implements RuleInterface
         get => 'uppercase';
     }
 
-    public function validate(mixed $value, ContextInterface $context): true|ErrorMessageCollectorInterface
-    {
+    public function validate(
+        mixed $value,
+        ContextInterface $context,
+    ): true|ErrorMessageCollectorInterface {
         if (is_string($value) && $value === strtoupper($value)) {
             return true;
         }
 
-        $collector = new ErrorMessageCollector();
-        $collector->add(
+        $errors = new ErrorMessageCollector();
+        $errors->add(
             (string) $context->getAttribute(ContextInterface::CURRENT_PATH_ATTRIBUTE, ''),
             new ErrorMessage($context, 'validation.uppercase.invalid'),
         );
 
-        return $collector;
+        return $errors;
     }
 }
 ```
 
-Register it through `RuleFactory::register()`:
+Register a custom string rule through `RuleFactory::register()` and aliases through `RuleFactory::alias()`. Mark a registration as composite only when its parameters are nested rule definitions.
 
-```php
-$ruleFactory->register('uppercase', static fn (): RuleInterface => new Uppercase());
-$ruleFactory->alias('upper', 'uppercase');
-```
+## Configuration keys
 
-For composite rules whose parameters should be parsed as nested rules, pass `composite: true`.
-
-## Context
-
-`Context` is immutable. Use `withAttribute()` and `withAttributes()` to derive a modified context.
-
-```php
-use Componenta\Validation\Context;
-use Componenta\Validation\ContextInterface;
-
-$context = new Context([
-    ContextInterface::STOP_ON_FIRST_FAILURE_ATTRIBUTE => true,
-    ContextInterface::THROW_ON_FAILURE_ATTRIBUTE => true,
-]);
-```
-
-Important context attributes:
-
-| Attribute | Meaning |
+| Key | Purpose |
 |---|---|
-| `VALIDATION_DATA_ATTRIBUTE` | Original input data. |
-| `VALIDATION_RULES_ATTRIBUTE` | Rules collection. |
-| `CURRENT_PATH_ATTRIBUTE` | Current full field path. |
-| `CURRENT_FIELD_ATTRIBUTE` | Current field name. |
-| `CURRENT_RULE_ATTRIBUTE` | Current rule name. |
-| `PROCESSED_RULES_ATTRIBUTE` | Rule names processed so far. |
-| `LAST_PROCESSED_RULE_ATTRIBUTE` | Last processed rule name. |
-| `PROCESSED_FIELDS_ATTRIBUTE` | Field paths processed so far. |
-| `LAST_PROCESSED_FIELD_ATTRIBUTE` | Last processed field path. |
-| `SKIP_MISSING_RULES_ATTRIBUTE` | Skip fields without rules. |
-| `STOP_ON_FIRST_FAILURE_ATTRIBUTE` | Stop on the first error. |
-| `THROW_ON_FAILURE_ATTRIBUTE` | Throw `ValidationException` after failure. |
-| `MESSAGE_FORMATTER_ATTRIBUTE` | Formatter used for messages. |
-| `LOCALE_ATTRIBUTE` | Locale key. |
-
-## Messages
-
-`MessageFormatterInterface` formats error keys through dictionaries. If `ConfigKey::DICTIONARY` is empty, `MessageFormatterFactory` loads default dictionaries for configured locales.
-
-Configuration keys:
-
-| Key | Meaning |
-|---|---|
-| `ConfigKey::VALIDATORS_MAP` | Class-to-validator map. |
+| `ConfigKey::VALIDATORS_MAP` | Explicit entry-id to validator-service map. |
+| `ConfigKey::COMPILED_VALIDATORS` | Versioned compiled attribute descriptor map. |
 | `ConfigKey::DICTIONARY` | Custom message dictionary. |
-| `ConfigKey::USED_LOCALES` | Locales to load. |
-| `ConfigKey::DEFAULT_LOCALE` | Default locale. |
+| `ConfigKey::USED_LOCALES` | Locales whose dictionaries are loaded. |
+| `ConfigKey::DEFAULT_LOCALE` | Default formatter locale. |
 
-Default locale constants include `LOCALE_EN`, `LOCALE_RU`, `LOCALE_ES`, `LOCALE_FR`, and `LOCALE_DE`.
-
-## ConfigProvider
-
-`Componenta\Validation\ConfigProvider` registers:
-
-- `ValidatorFactoryInterface`
-- `ValidationProviderInterface`
-- `RuleFactoryInterface`
-- `MessageFormatterInterface`
-- default locale configuration
-
-Rule factory creation accepts normal callable factories; it does not require DI-specific lazy service factories.
+The core `ConfigProvider` registers `ValidatorFactoryInterface`, `ValidationProviderInterface`, `RuleFactoryInterface`, `MessageFormatterInterface`, and default locale configuration.
