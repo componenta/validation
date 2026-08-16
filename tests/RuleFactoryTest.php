@@ -8,7 +8,7 @@ use Componenta\Validation\Context;
 use Componenta\Validation\Error\ErrorMessageCollectorInterface;
 use Componenta\Validation\Rule\AllOf;
 use Componenta\Validation\Rule\Email;
-use Componenta\Validation\Rule\IfThen;
+use Componenta\Validation\Rule\OneOf;
 use Componenta\Validation\Rule\Required;
 use Componenta\Validation\Rule\RuleFactory;
 use Componenta\Validation\Rule\RuleInterface;
@@ -44,10 +44,29 @@ final class RuleFactoryTest extends TestCase
         $rule = $factory->createRule('nullable|email');
         $context = new Context();
 
-        self::assertInstanceOf(IfThen::class, $rule);
+        self::assertInstanceOf(AllOf::class, $rule);
         self::assertTrue($rule->validate(null, $context));
         self::assertTrue($rule->validate('user@example.com', $context));
         self::assertInstanceOf(ErrorMessageCollectorInterface::class, $rule->validate('bad', $context));
+    }
+
+    public function testSimpleCompositeRulesAcceptCommaSyntax(): void
+    {
+        $factory = new RuleFactory();
+        $rule = $factory->createRule('oneof:email,url');
+
+        self::assertInstanceOf(OneOf::class, $rule);
+        self::assertTrue($rule->validate('https://example.com', new Context()));
+        self::assertTrue($rule->validate('user@example.com', new Context()));
+    }
+
+    public function testParameterizedCompositeRulesUsePipeSyntax(): void
+    {
+        $factory = new RuleFactory();
+        $rule = $factory->createRule('oneof:email|length:2,100');
+
+        self::assertInstanceOf(OneOf::class, $rule);
+        self::assertTrue($rule->validate('ok', new Context()));
     }
 
     public function testCustomRulesCanBeRegisteredAndAliased(): void

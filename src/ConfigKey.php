@@ -12,6 +12,8 @@ class ConfigKey extends \Componenta\Config\ConfigKey
 
     public const int COMPILED_VALIDATORS_VERSION = 1;
 
+    public const string REQUIRE_COMPILED_VALIDATORS = 'VALIDATION_REQUIRE_COMPILED_VALIDATORS';
+
     public const string DICTIONARY = 'VALIDATION_DICTIONARY';
 
     public const string LOCALE_EN = 'en_US';

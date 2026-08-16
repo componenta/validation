@@ -15,6 +15,7 @@ use Componenta\Validation\Provider\MappedValidationProvider;
 use Componenta\Validation\Provider\ValidatableProvider;
 use Componenta\Validation\Provider\ValidatedByProvider;
 use Componenta\Validation\Rule\RuleFactoryInterface;
+use InvalidArgumentException;
 use Psr\Container\ContainerExceptionInterface;
 use Psr\Container\ContainerInterface;
 use Psr\Container\NotFoundExceptionInterface;
@@ -64,21 +65,30 @@ final readonly class ValidationProviderFactory
         }
 
         $compiled = $config->get(ConfigKey::COMPILED_VALIDATORS, null);
-        if ($compiled !== null) {
-            if (!is_array($compiled)) {
-                throw new \InvalidArgumentException(sprintf(
-                    '%s must be an array; got %s.',
+        if ($compiled === null) {
+            if ($config->bool(ConfigKey::REQUIRE_COMPILED_VALIDATORS, false)) {
+                throw new InvalidArgumentException(sprintf(
+                    'Compiled validation map is missing from %s; run app:build before starting a non-development application.',
                     ConfigKey::COMPILED_VALIDATORS,
-                    get_debug_type($compiled),
                 ));
             }
 
-            $provider->add(new CompiledValidationProvider(
-                $compiled,
-                $validatorFactory,
-                new ValidatorDefinitionFactory($ruleFactory),
+            return $provider;
+        }
+
+        if (!is_array($compiled)) {
+            throw new InvalidArgumentException(sprintf(
+                '%s must be an array; got %s.',
+                ConfigKey::COMPILED_VALIDATORS,
+                get_debug_type($compiled),
             ));
         }
+
+        $provider->add(new CompiledValidationProvider(
+            $compiled,
+            $validatorFactory,
+            new ValidatorDefinitionFactory($ruleFactory),
+        ));
 
         return $provider;
     }

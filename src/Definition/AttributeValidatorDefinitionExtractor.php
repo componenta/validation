@@ -89,9 +89,11 @@ final readonly class AttributeValidatorDefinitionExtractor
             $attribute = $validatedBy[0]->newInstance();
             $validator = $attribute->validator;
 
-            if (!class_exists($validator) || !is_a($validator, ValidatorInterface::class, true)) {
+            if ((!class_exists($validator) && !interface_exists($validator))
+                || !is_a($validator, ValidatorInterface::class, true)
+            ) {
                 throw new InvalidArgumentException(sprintf(
-                    '#[ValidatedBy] on "%s" must reference a class implementing %s; got "%s".',
+                    '#[ValidatedBy] on "%s" must reference a class or interface implementing %s; got "%s".',
                     $reflection->getName(),
                     ValidatorInterface::class,
                     $validator,

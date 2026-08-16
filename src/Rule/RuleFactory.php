@@ -47,12 +47,8 @@ final class RuleFactory implements RuleFactoryInterface
 
             $children = array_map(
                 $this->createRule(...),
-                $this->splitByPipe(substr($definition, strlen($prefix))),
+                $this->splitCompositeRules(substr($definition, strlen($prefix))),
             );
-
-            if ($children === []) {
-                throw new InvalidArgumentException(sprintf('%s requires at least one nested rule.', rtrim($prefix, ':')));
-            }
 
             return $composite === AllOf::class
                 ? RuleComposer::all(...$children)
@@ -87,11 +83,9 @@ final class RuleFactory implements RuleFactoryInterface
             return $nullable ?? throw new InvalidArgumentException('Composite rule contains no rules.');
         }
 
-        $composed = RuleComposer::all(...$rules);
-
         return $nullable === null
-            ? $composed
-            : new IfThen($nullable->inverse(...), $composed);
+            ? RuleComposer::all(...$rules)
+            : RuleComposer::all($nullable, ...$rules);
     }
 
     /**
@@ -226,6 +220,39 @@ final class RuleFactory implements RuleFactoryInterface
         }
 
         return $params;
+    }
+
+    /** @return non-empty-list<string> */
+    private function splitCompositeRules(string $content): array
+    {
+        $content = trim($content);
+        if ($content === '') {
+            throw new InvalidArgumentException('Composite rule requires at least one nested rule.');
+        }
+
+        if (str_contains($content, '|')) {
+            return $this->splitByPipe($content);
+        }
+
+        if (!str_contains($content, ',')) {
+            return [$content];
+        }
+
+        $children = array_values(array_filter(
+            array_map('trim', explode(',', $content)),
+            static fn (string $child): bool => $child !== '',
+        ));
+
+        if (count($children) > 1 && array_all(
+            $children,
+            fn (string $child): bool => !str_contains($child, ':') && $this->has($child),
+        )) {
+            return $children;
+        }
+
+        // Parameterized nested rules must use the unambiguous pipe separator,
+        // for example: oneof:email|length:2,100.
+        return [$content];
     }
 
     /** @return non-empty-list<string> */

@@ -40,8 +40,18 @@ final class OneOf implements RuleInterface
         );
         $firstErrors = null;
         $errors = null;
+        $hasConstraint = false;
 
         foreach ($this->rules as $rule) {
+            if ($rule instanceof Nullable) {
+                if ($rule($value)) {
+                    return true;
+                }
+
+                continue;
+            }
+
+            $hasConstraint = true;
             $result = $rule->validate($value, $context);
             if ($result === true) {
                 return true;
@@ -54,6 +64,12 @@ final class OneOf implements RuleInterface
             }
         }
 
-        return $stopFirst ? $firstErrors ?? true : $errors ?? true;
+        if (!$hasConstraint) {
+            return true;
+        }
+
+        return $stopFirst
+            ? $firstErrors ?? new ErrorMessageCollector()
+            : $errors ?? new ErrorMessageCollector();
     }
 }
