@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Componenta\Validation\Rule;
 
 use Componenta\Validation\ContextInterface;
@@ -8,21 +10,6 @@ use Componenta\Validation\Error\ErrorMessageCollector;
 use Componenta\Validation\Error\ErrorMessageCollectorInterface;
 use Cycle\Database\DatabaseInterface;
 
-/**
- * Exists rule: value must exist in database table.
- *
- * Examples:
- *   new Exists($db, 'users')              // Check id column
- *   new Exists($db, 'users', 'email')     // Check email column
- *
- * String syntax:
- *   "exists(users)"
- *   "exists(users, email)"
- *
- * Attribute usage:
- *   #[Exists(table: 'categories')]
- *   (use Componenta\Validation\Attribute\Exists)
- */
 final class Exists implements RuleInterface
 {
     public const string NOT_EXISTS_MESSAGE_ID = 'validation.exists';
@@ -44,7 +31,7 @@ final class Exists implements RuleInterface
         }
 
         return $this->db
-            ->select('*')
+            ->select($this->column)
             ->from($this->table)
             ->where($this->column, $value)
             ->limit(1)
@@ -70,8 +57,6 @@ final class Exists implements RuleInterface
 
     public static function getMessages(): array
     {
-        return [
-            self::NOT_EXISTS_MESSAGE_ID => 'The selected :attribute does not exist.',
-        ];
+        return [self::NOT_EXISTS_MESSAGE_ID => 'The selected :attribute does not exist.'];
     }
 }

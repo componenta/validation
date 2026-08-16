@@ -6,7 +6,10 @@ namespace Componenta\Validation\Factory;
 
 use Componenta\Config\Config;
 use Componenta\Validation\ConfigKey;
+use Componenta\Validation\Definition\AttributeValidatorDefinitionExtractor;
+use Componenta\Validation\Definition\ValidatorDefinitionFactory;
 use Componenta\Validation\Provider\AttributeValidationProvider;
+use Componenta\Validation\Provider\CompiledValidationProvider;
 use Componenta\Validation\Provider\CompositeValidationProvider;
 use Componenta\Validation\Provider\MappedValidationProvider;
 use Componenta\Validation\Provider\ValidatableProvider;
@@ -16,20 +19,10 @@ use Psr\Container\ContainerExceptionInterface;
 use Psr\Container\ContainerInterface;
 use Psr\Container\NotFoundExceptionInterface;
 
-/**
- * Factory for creating composite validation provider.
- *
- * Creates provider chain with different strategies based on environment.
- * In development mode includes attribute scanning providers for convenience.
- * In production mode uses only explicitly registered validators for performance.
- */
+/** Creates the environment-appropriate validation provider chain. */
 final readonly class ValidationProviderFactory
 {
     /**
-     * Create validation provider with configured provider chain.
-     *
-     * @param ContainerInterface $container DI container
-     * @return CompositeValidationProvider Configured validation provider
      * @throws ContainerExceptionInterface
      * @throws NotFoundExceptionInterface
      */
@@ -37,28 +30,54 @@ final readonly class ValidationProviderFactory
     {
         /** @var Config $config */
         $config = $container->get(ConfigKey::CONFIG);
+        /** @var ValidatorFactoryInterface $validatorFactory */
+        $validatorFactory = $container->get(ValidatorFactoryInterface::class);
+        /** @var RuleFactoryInterface $ruleFactory */
+        $ruleFactory = $container->get(RuleFactoryInterface::class);
 
-        $devMode = !$config?->environment->bool('production', false) ?? true;
+        $isDevelopment = $config->environment?->match(
+            'APP_ENV',
+            'development',
+            default: 'development',
+            strict: true,
+        ) ?? true;
 
         $provider = new CompositeValidationProvider(
-            new ValidatableProvider($container->get(ValidatorFactoryInterface::class)),
-            $mappedProvider = new MappedValidationProvider($container)
+            new ValidatableProvider($validatorFactory),
+            $mappedProvider = new MappedValidationProvider($container),
         );
 
-        // Register static mappings from configuration
         foreach ($config->array(ConfigKey::VALIDATORS_MAP, []) as $entry => $validator) {
             $mappedProvider->register($entry, $validator);
         }
 
-        // Add attribute-based providers in development mode
-        if ($devMode) {
-            $provider->add(
-                new AttributeValidationProvider(
-                    $container->get(ValidatorFactoryInterface::class),
-                    $container->get(RuleFactoryInterface::class))
-            );
-
+        if ($isDevelopment) {
+            $extractor = new AttributeValidatorDefinitionExtractor();
+            $provider->add(new AttributeValidationProvider(
+                $validatorFactory,
+                $ruleFactory,
+                $extractor,
+            ));
             $provider->add(new ValidatedByProvider($container));
+
+            return $provider;
+        }
+
+        $compiled = $config->get(ConfigKey::COMPILED_VALIDATORS, null);
+        if ($compiled !== null) {
+            if (!is_array($compiled)) {
+                throw new \InvalidArgumentException(sprintf(
+                    '%s must be an array; got %s.',
+                    ConfigKey::COMPILED_VALIDATORS,
+                    get_debug_type($compiled),
+                ));
+            }
+
+            $provider->add(new CompiledValidationProvider(
+                $compiled,
+                $validatorFactory,
+                new ValidatorDefinitionFactory($ruleFactory),
+            ));
         }
 
         return $provider;

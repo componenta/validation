@@ -12,29 +12,18 @@ use Componenta\Validation\Error\ErrorMessageCollector;
 use Componenta\Validation\Error\ErrorMessageCollectorInterface;
 use Psr\Http\Message\UploadedFileInterface;
 
-/**
- * MimeType rule: uploaded file must have an allowed MIME type.
- *
- * Uses content-based detection (finfo) for security -
- * does not trust the client-reported Content-Type header.
- *
- * Example:
- *   new MimeType($detector, ['image/jpeg', 'image/png', 'image/webp'])
- */
 #[Attribute(Attribute::TARGET_PROPERTY | Attribute::TARGET_PARAMETER)]
 final class MimeType implements RuleInterface
 {
     public const string NOT_UPLOADED_FILE_MESSAGE_ID = 'validation.mime_type.not_uploaded_file';
+    public const string UPLOAD_ERROR_MESSAGE_ID = 'validation.mime_type.upload_error';
     public const string INVALID_MIME_TYPE_MESSAGE_ID = 'validation.mime_type.invalid';
 
     public string $name {
         get => 'mime_type';
     }
 
-    /**
-     * @param MimeTypeDetectorInterface $detector Content-based MIME detector
-     * @param list<string> $allowed Allowed MIME types
-     */
+    /** @param list<string> $allowed */
     public function __construct(
         private readonly MimeTypeDetectorInterface $detector,
         private readonly array $allowed,
@@ -42,7 +31,7 @@ final class MimeType implements RuleInterface
 
     public function __invoke(mixed $value): bool
     {
-        if (!$value instanceof UploadedFileInterface) {
+        if (!$value instanceof UploadedFileInterface || $value->getError() !== UPLOAD_ERR_OK) {
             return false;
         }
 
@@ -64,8 +53,15 @@ final class MimeType implements RuleInterface
             return $collector;
         }
 
-        $mimeType = $this->detector->detectMimeType($value->getStream());
+        if ($value->getError() !== UPLOAD_ERR_OK) {
+            $collector->add($path, new ErrorMessage($context, self::UPLOAD_ERROR_MESSAGE_ID, [
+                'code' => $value->getError(),
+            ]));
 
+            return $collector;
+        }
+
+        $mimeType = $this->detector->detectMimeType($value->getStream());
         if ($mimeType === null || !in_array($mimeType, $this->allowed, true)) {
             $collector->add($path, new ErrorMessage($context, self::INVALID_MIME_TYPE_MESSAGE_ID, [
                 'allowed' => implode(', ', $this->allowed),
@@ -82,6 +78,7 @@ final class MimeType implements RuleInterface
     {
         return [
             self::NOT_UPLOADED_FILE_MESSAGE_ID => 'The value must be an uploaded file, :type given.',
+            self::UPLOAD_ERROR_MESSAGE_ID => 'MIME type cannot be checked because upload failed with error code :code.',
             self::INVALID_MIME_TYPE_MESSAGE_ID => 'File type :actual is not allowed. Allowed types: :allowed.',
         ];
     }

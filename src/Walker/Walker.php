@@ -1,235 +1,190 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Componenta\Validation\Walker;
 
 use Componenta\Validation\Rule\RuleCollectorInterface;
 use Componenta\Validation\Rule\RuleInterface;
 use Generator;
+use Traversable;
 
-/**
- * Walks over data recursively and yields Target objects with correct rules.
- *
- * Supports exact keys and wildcards (e.g., "users.*.addresses.*").
- *
- * Optimizations:
- * - No internal state; rules passed recursively.
- * - Works directly with iterable without unnecessary conversion.
- * - Caches resolved rules for paths to speed up repeated lookups.
- */
+/** Walks actual and missing values for exact and wildcard rule paths. */
 final class Walker implements WalkerInterface
 {
-    /**
-     * Cache of path => [PolicyInterface|null, hasWildcardChild: bool]
-     * @var array<string, array{0: RuleInterface|null, 1: bool}>
-     */
+    /** @var array<string, RuleInterface|null> */
     private array $ruleCache = [];
 
-    /**
-     * @param iterable $data Input data
-     * @param RuleCollectorInterface $rules Rules collection
-     * @return Generator<Target>
-     */
+    /** @var array<string, true> */
+    private array $yieldedPaths = [];
+
     public function walk(iterable $data, RuleCollectorInterface $rules): Generator
     {
-        $this->ruleCache = []; // Reset cache for each walk
+        $this->ruleCache = [];
+        $this->yieldedPaths = [];
+        $data = self::materialize($data);
 
         yield from $this->walkData($data, $rules, '');
-        yield from $this->walkMissingRules($data, $rules);
+
+        foreach ($rules->toArray() as $pattern => $rule) {
+            yield from $this->walkMissingPattern(
+                $data,
+                explode('.', $pattern),
+                0,
+                '',
+                $rule,
+            );
+        }
     }
 
-    /**
-     * Walk actual data and yield Targets.
-     *
-     * @param iterable $data
-     * @param RuleCollectorInterface $rules
-     * @param string $parentPath
-     * @return Generator<Target>
-     */
-    private function walkData(iterable $data, RuleCollectorInterface $rules, string $parentPath): Generator
+    /** @param array<array-key, mixed> $data */
+    private function walkData(array $data, RuleCollectorInterface $rules, string $parentPath): Generator
     {
         foreach ($data as $key => $value) {
-            $currentPath = $parentPath === '' ? (string) $key : $parentPath . '.' . $key;
+            $field = (string) $key;
+            $path = $parentPath === '' ? $field : $parentPath . '.' . $field;
+            $this->yieldedPaths[$path] = true;
 
-            [$rule, $hasWildcardChild] = $this->resolveRule($currentPath, $rules);
+            yield new Target($field, $path, $this->resolveRule($path, $rules), $value);
 
-            // If this is a container with only wildcard children, recurse without yielding
-            if ($rule === null && $hasWildcardChild && $this->isIterable($value)) {
-                yield from $this->walkData($value, $rules, $currentPath);
-                continue;
-            }
-
-            yield new Target((string) $key, $currentPath, $rule, $value);
-
-            if ($this->isIterable($value)) {
-                yield from $this->walkData($value, $rules, $currentPath);
+            if (is_array($value)) {
+                yield from $this->walkData($value, $rules, $path);
             }
         }
     }
 
     /**
-     * Yield Targets for missing fields that exist in rules but not in data.
-     *
-     * Only simple (non-dot, non-wildcard) root-level keys are handled here.
-     *
-     * @param iterable $data
-     * @param RuleCollectorInterface $rules
-     * @return Generator<Target>
+     * @param array<array-key, mixed>|mixed $value
+     * @param list<string> $segments
      */
-    private function walkMissingRules(iterable $data, RuleCollectorInterface $rules): Generator
-    {
-        $arrayData = is_array($data) ? $data : iterator_to_array($data);
-
-        foreach ($rules->toArray() as $ruleKey => $ruleItem) {
-            if (str_contains($ruleKey, '*') || str_contains($ruleKey, '.')) {
-                continue;
-            }
-
-            if (!array_key_exists($ruleKey, $arrayData)) {
-                yield new Target($ruleKey, $ruleKey, $ruleItem, null);
-            }
+    private function walkMissingPattern(
+        mixed $value,
+        array $segments,
+        int $index,
+        string $parentPath,
+        RuleInterface $rule,
+    ): Generator {
+        $segment = $segments[$index] ?? null;
+        if ($segment === null) {
+            return;
         }
+
+        $last = $index === count($segments) - 1;
+
+        if ($segment === '*') {
+            if (!is_array($value)) {
+                return;
+            }
+
+            foreach ($value as $key => $child) {
+                $path = $parentPath === '' ? (string) $key : $parentPath . '.' . $key;
+                if ($last) {
+                    continue;
+                }
+
+                yield from $this->walkMissingPattern(
+                    $child,
+                    $segments,
+                    $index + 1,
+                    $path,
+                    $rule,
+                );
+            }
+
+            return;
+        }
+
+        $path = $parentPath === '' ? $segment : $parentPath . '.' . $segment;
+        if (is_array($value) && array_key_exists($segment, $value)) {
+            if (!$last) {
+                yield from $this->walkMissingPattern(
+                    $value[$segment],
+                    $segments,
+                    $index + 1,
+                    $path,
+                    $rule,
+                );
+            }
+
+            return;
+        }
+
+        $remaining = array_slice($segments, $index);
+        if (in_array('*', $remaining, true)) {
+            return;
+        }
+
+        $missingPath = $parentPath === ''
+            ? implode('.', $remaining)
+            : $parentPath . '.' . implode('.', $remaining);
+
+        if (isset($this->yieldedPaths[$missingPath])) {
+            return;
+        }
+
+        $this->yieldedPaths[$missingPath] = true;
+        yield new Target($segments[array_key_last($segments)], $missingPath, $rule, null);
     }
 
-    /**
-     * Resolve rule for a given path, including wildcard matches.
-     *
-     * Supports multi-wildcard patterns like "users.*.addresses.*".
-     *
-     * Returns [Rule|null, hasWildcardChild: bool]
-     *
-     * @param string $path
-     * @param RuleCollectorInterface $rules
-     * @return array{0: RuleInterface|null, 1: bool}
-     */
-    private function resolveRule(string $path, RuleCollectorInterface $rules): array
+    private function resolveRule(string $path, RuleCollectorInterface $rules): ?RuleInterface
     {
-        if (isset($this->ruleCache[$path])) {
+        if (array_key_exists($path, $this->ruleCache)) {
             return $this->ruleCache[$path];
         }
 
-        // Exact match
         if ($rules->has($path)) {
-            $result = [$rules->get($path), $this->hasWildcardChild($path, $rules)];
-            $this->ruleCache[$path] = $result;
-            return $result;
+            return $this->ruleCache[$path] = $rules->get($path);
         }
 
-        // Generate all possible wildcard patterns
-        $segments = explode('.', $path);
-        $patterns = $this->generateWildcardPatterns($segments);
+        $pathSegments = explode('.', $path);
+        $best = null;
+        $bestSpecificity = -1;
 
-        foreach ($patterns as $pattern) {
-            if ($rules->has($pattern)) {
-                $result = [$rules->get($pattern), $this->hasWildcardChild($path, $rules)];
-                $this->ruleCache[$path] = $result;
-                return $result;
+        foreach ($rules->toArray() as $pattern => $candidate) {
+            if (!str_contains($pattern, '*')) {
+                continue;
             }
-        }
 
-        $result = [null, $this->hasWildcardChild($path, $rules)];
-        $this->ruleCache[$path] = $result;
-        return $result;
-    }
-
-    /**
-     * Generate all possible wildcard patterns for a path.
-     *
-     * For path "users.0.addresses.1.city", generates patterns like:
-     * - users.*.addresses.1.city
-     * - users.0.addresses.*.city
-     * - users.*.addresses.*.city
-     * - etc.
-     *
-     * Patterns are ordered by specificity (fewer wildcards first).
-     *
-     * @param array<int, string> $segments
-     * @return Generator<string>
-     */
-    private function generateWildcardPatterns(array $segments): Generator
-    {
-        $numericIndices = [];
-        foreach ($segments as $i => $segment) {
-            if (is_numeric($segment)) {
-                $numericIndices[] = $i;
+            $patternSegments = explode('.', $pattern);
+            if (count($patternSegments) !== count($pathSegments)) {
+                continue;
             }
-        }
 
-        if (empty($numericIndices)) {
-            return;
-        }
-
-        // Generate all combinations of wildcard replacements
-        // Start with single wildcards, then pairs, etc. (ordered by specificity)
-        $count = count($numericIndices);
-
-        for ($numWildcards = 1; $numWildcards <= $count; $numWildcards++) {
-            foreach ($this->combinations($numericIndices, $numWildcards) as $combo) {
-                $pattern = $segments;
-                foreach ($combo as $idx) {
-                    $pattern[$idx] = '*';
+            $matches = true;
+            $specificity = 0;
+            foreach ($patternSegments as $index => $segment) {
+                if ($segment === '*') {
+                    continue;
                 }
-                yield implode('.', $pattern);
+
+                if ($segment !== $pathSegments[$index]) {
+                    $matches = false;
+                    break;
+                }
+
+                $specificity++;
+            }
+
+            if ($matches && $specificity > $bestSpecificity) {
+                $best = $candidate;
+                $bestSpecificity = $specificity;
             }
         }
+
+        return $this->ruleCache[$path] = $best;
     }
 
-    /**
-     * Generate all k-combinations of an array.
-     *
-     * @param array<int, int> $items
-     * @param int $k
-     * @return Generator<array<int, int>>
-     */
-    private function combinations(array $items, int $k): Generator
+    /** @return array<array-key, mixed> */
+    private static function materialize(iterable $data): array
     {
-        $n = count($items);
-        if ($k > $n) {
-            return;
+        $result = is_array($data) ? $data : iterator_to_array($data);
+
+        foreach ($result as $key => $value) {
+            if (is_array($value) || $value instanceof Traversable) {
+                $result[$key] = self::materialize($value);
+            }
         }
 
-        $indices = range(0, $k - 1);
-
-        yield array_map(fn($i) => $items[$i], $indices);
-
-        while (true) {
-            $i = $k - 1;
-            while ($i >= 0 && $indices[$i] === $n - $k + $i) {
-                $i--;
-            }
-
-            if ($i < 0) {
-                break;
-            }
-
-            $indices[$i]++;
-            for ($j = $i + 1; $j < $k; $j++) {
-                $indices[$j] = $indices[$j - 1] + 1;
-            }
-
-            yield array_map(fn($idx) => $items[$idx], $indices);
-        }
-    }
-
-    /**
-     * Check if there's a wildcard child rule for the given path.
-     *
-     * @param string $path
-     * @param RuleCollectorInterface $rules
-     * @return bool
-     */
-    private function hasWildcardChild(string $path, RuleCollectorInterface $rules): bool
-    {
-        return $rules->has($path . '.*');
-    }
-
-    /**
-     * Checks if a value is iterable and not a string.
-     *
-     * @param mixed $value
-     * @return bool
-     */
-    private function isIterable(mixed $value): bool
-    {
-        return is_iterable($value) && !is_string($value);
+        return $result;
     }
 }

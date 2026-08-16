@@ -1,26 +1,24 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Componenta\Validation\Rule;
 
+use Componenta\Validation\Context;
 use Componenta\Validation\ContextInterface;
 use Componenta\Validation\Error\ErrorMessageCollector;
 use Componenta\Validation\Error\ErrorMessageCollectorInterface;
 
-/**
- * OneOf: passes if at least one rule passes
- *
- * Example:
- *   new OneOf(new Email(), new Phone());
- */
+/** Passes when at least one child rule passes. */
 final class OneOf implements RuleInterface
 {
-    /** @var array<int, RuleInterface> */
+    /** @var non-empty-list<RuleInterface> */
     private array $rules;
 
     public string $name {
         get => 'one_of(' . implode('|', array_map(
-            static fn(RuleInterface $r): string => $r->name,
-            $this->rules
+            static fn (RuleInterface $rule): string => $rule->name,
+            $this->rules,
         )) . ')';
     }
 
@@ -31,33 +29,31 @@ final class OneOf implements RuleInterface
 
     public function __invoke(mixed $value): bool
     {
-        foreach ($this->rules as $rule) {
-            if (($rule)($value)) {
-                return true;
-            }
-        }
-        return false;
+        return $this->validate($value, new Context()) === true;
     }
 
     public function validate(mixed $value, ContextInterface $context): true|ErrorMessageCollectorInterface
     {
+        $stopFirst = (bool) $context->getAttribute(
+            ContextInterface::STOP_ON_FIRST_FAILURE_ATTRIBUTE,
+            false,
+        );
+        $firstErrors = null;
         $errors = null;
-        $stopFirst = (bool) $context->getAttribute(ContextInterface::STOP_ON_FIRST_FAILURE_ATTRIBUTE, false);
 
         foreach ($this->rules as $rule) {
             $result = $rule->validate($value, $context);
             if ($result === true) {
-                return true; // at least one passed
+                return true;
             }
 
-            $errors ??= new ErrorMessageCollector();
-            $errors->merge($result);
-
-            if ($stopFirst) {
-                break;
+            $firstErrors ??= $result;
+            if (!$stopFirst) {
+                $errors ??= new ErrorMessageCollector();
+                $errors->merge($result);
             }
         }
 
-        return $errors ?? true;
+        return $stopFirst ? $firstErrors ?? true : $errors ?? true;
     }
 }

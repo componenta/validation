@@ -1,10 +1,16 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Componenta\Validation;
 
 class ConfigKey extends \Componenta\Config\ConfigKey
 {
     public const string VALIDATORS_MAP = 'VALIDATION_VALIDATORS_MAP';
+
+    public const string COMPILED_VALIDATORS = 'VALIDATION_COMPILED_VALIDATORS';
+
+    public const int COMPILED_VALIDATORS_VERSION = 1;
 
     public const string DICTIONARY = 'VALIDATION_DICTIONARY';
 

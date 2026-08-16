@@ -1,38 +1,23 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Componenta\Validation\Rule;
 
 use Componenta\Detector\MimeTypeDetectorInterface;
-use Componenta\Validation\ContextInterface;
 use Cycle\Database\DatabaseInterface;
 use InvalidArgumentException;
 
-/**
- * Factory for creating rules from string definitions.
- *
- * Syntax: rule or rule:param1,param2,...
- * Multiple rules separated by "|"
- *
- * Auto-detection of nested rules in parameters only applies to composite rules
- * (registered with `composite: true`). For all other rules, parameters are plain strings.
- *
- * Examples:
- *   "required"                          -> Required
- *   "length:8,255"                      -> Length(8, 255)
- *   "in:draft,published"                -> In(['draft', 'published'])
- *   "required|email"                    -> AllOf(Required, Email)
- *   "required|email|length:,255"        -> AllOf(Required, Email, Length)
- *   "allof:required|email"              -> AllOf(Required, Email)
- *   "allof:required|length:2,100"       -> AllOf(Required, Length)
- *   "arrayof:email"                     -> ArrayOf(Email)
- *   "regex:/^\d+$/"                     -> Regex('/^\d+$/')
- */
+/** Creates validation rules from the package's declarative string grammar. */
 final class RuleFactory implements RuleFactoryInterface
 {
     /** @var array<string, callable(array): RuleInterface> */
     private array $factories = [];
+
+    /** @var array<string, string> */
     private array $aliases = [];
-    /** @var array<string, true> Rules whose parameters are nested rules, not plain strings. */
+
+    /** @var array<string, true> */
     private array $compositeRules = [];
 
     public function __construct(
@@ -45,108 +30,90 @@ final class RuleFactory implements RuleFactoryInterface
     public function createRule(string $definition): RuleInterface
     {
         $definition = trim($definition);
-
         if ($definition === '') {
-            throw new InvalidArgumentException('Rule definition cannot be empty');
+            throw new InvalidArgumentException('Rule definition cannot be empty.');
         }
 
-        // Multiple rules: "required|email" -> AllOf (default)
-        // But if nullable is present: "nullable|email" -> OneOf
+        $lower = strtolower($definition);
+        foreach ([
+            'allof:' => AllOf::class,
+            'all_of:' => AllOf::class,
+            'oneof:' => OneOf::class,
+            'one_of:' => OneOf::class,
+        ] as $prefix => $composite) {
+            if (!str_starts_with($lower, $prefix)) {
+                continue;
+            }
+
+            $children = array_map(
+                $this->createRule(...),
+                $this->splitByPipe(substr($definition, strlen($prefix))),
+            );
+
+            if ($children === []) {
+                throw new InvalidArgumentException(sprintf('%s requires at least one nested rule.', rtrim($prefix, ':')));
+            }
+
+            return $composite === AllOf::class
+                ? RuleComposer::all(...$children)
+                : new OneOf(...$children);
+        }
+
+        foreach (['arrayof:', 'array_of:'] as $prefix) {
+            if (str_starts_with($lower, $prefix)) {
+                return new ArrayOf($this->createRule(substr($definition, strlen($prefix))));
+            }
+        }
+
         $parts = $this->splitByPipe($definition);
+        if (count($parts) === 1) {
+            return $this->createSingleRule($definition);
+        }
 
-        if (count($parts) > 1) {
-            $nullableRule = null;
-            $rules = [];
+        $nullable = null;
+        $rules = [];
 
-            foreach ($parts as $p) {
-                $rule = $this->createSingleRule($p);
-                // Check if this is the nullable rule (use instanceof for reliability)
-                if ($nullableRule === null && $rule instanceof Nullable) {
-                    $nullableRule = $rule;
-                    continue;
-                }
-
-                $rules[] = $rule;
+        foreach ($parts as $part) {
+            $rule = $this->createSingleRule($part);
+            if ($nullable === null && $rule instanceof Nullable) {
+                $nullable = $rule;
+                continue;
             }
 
-            return $nullableRule === null ? new AllOf(...$rules)
-                : new IfThen($nullableRule->inverse(...), new AllOf(...$rules));
+            $rules[] = $rule;
         }
 
-        return $this->createSingleRule($definition);
-    }
-
-    private function createSingleRule(string $definition): RuleInterface
-    {
-        $definition = trim($definition);
-
-        // Parse: name or name:params
-        if (str_starts_with($definition, 'regex:')) {
-            // Special case for regex (contains colons)
-            return new Regex(substr($definition, 6));
+        if ($rules === []) {
+            return $nullable ?? throw new InvalidArgumentException('Composite rule contains no rules.');
         }
 
-        $colonPos = strpos($definition, ':');
+        $composed = RuleComposer::all(...$rules);
 
-        if ($colonPos === false) {
-            // No params
-            $name = strtolower($definition);
-            $factory = $this->resolveFactory($name);
-
-            if ($factory === null) {
-                throw new InvalidArgumentException(sprintf('Unknown rule: "%s"', $name));
-            }
-
-            return $factory([]);
-        }
-
-        $name = strtolower(substr($definition, 0, $colonPos));
-        $paramsString = substr($definition, $colonPos + 1);
-
-        $factory = $this->resolveFactory($name);
-
-        if ($factory === null) {
-            throw new InvalidArgumentException(sprintf('Unknown rule: "%s"', $name));
-        }
-
-        $params = $this->parseParams($paramsString, $name);
-
-        return $factory($params);
-    }
-
-    /**
-     * Resolve factory by name or alias.
-     */
-    private function resolveFactory(string $name): ?callable
-    {
-        // Try direct factory lookup
-        if (isset($this->factories[$name])) {
-            return $this->factories[$name];
-        }
-
-        // Try alias lookup
-        if (isset($this->aliases[$name])) {
-            $target = $this->aliases[$name];
-            return $this->factories[$target] ?? null;
-        }
-
-        return null;
+        return $nullable === null
+            ? $composed
+            : new IfThen($nullable->inverse(...), $composed);
     }
 
     /**
      * @param string|string[] $names
      * @param callable(array): RuleInterface $ruleFactory
-     * @param bool $composite Whether parameters should be auto-detected as nested rules
      */
-    public function register(string|array $names, callable $ruleFactory, bool $composite = false): RuleFactory
-    {
-        $names = is_array($names) ? $names : [$names];
-
+    public function register(
+        string|array $names,
+        callable $ruleFactory,
+        bool $composite = false,
+    ): RuleFactory {
+        $names = is_array($names) ? array_values($names) : [$names];
         $name = array_shift($names);
-        $this->factories[strtolower($name)] = $ruleFactory;
 
+        if (!is_string($name) || trim($name) === '') {
+            throw new InvalidArgumentException('Rule name must be a non-empty string.');
+        }
+
+        $name = strtolower($name);
+        $this->factories[$name] = $ruleFactory;
         if ($composite) {
-            $this->compositeRules[strtolower($name)] = true;
+            $this->compositeRules[$name] = true;
         }
 
         foreach ($names as $alias) {
@@ -158,15 +125,14 @@ final class RuleFactory implements RuleFactoryInterface
 
     public function alias(string $alias, string $target, bool $composite = false): RuleFactory
     {
-        $alias = strtolower($alias);
-        $target = strtolower($target);
+        $alias = strtolower(trim($alias));
+        $target = strtolower(trim($target));
 
-        if (!isset($this->factories[$target])) {
+        if ($alias === '' || !isset($this->factories[$target])) {
             throw new InvalidArgumentException(sprintf('Unknown rule: "%s"', $target));
         }
 
         $this->aliases[$alias] = $target;
-
         if ($composite || isset($this->compositeRules[$target])) {
             $this->compositeRules[$alias] = true;
         }
@@ -177,141 +143,151 @@ final class RuleFactory implements RuleFactoryInterface
     public function has(string $name): bool
     {
         $name = strtolower($name);
+
         return isset($this->factories[$name]) || isset($this->aliases[$name]);
     }
 
-    /**
-     * Parse params, auto-detecting rules vs strings.
-     *
-     * Auto-detection of nested rules only applies to composite rules (allof, oneof, arrayof, ifthen).
-     * For all other rules, parameters are always treated as plain strings.
-     *
-     * @return array<int, RuleInterface|string>
-     */
-    private function parseParams(string $content, string $parentRule = ''): array
+    public function createRules(array $definitions): array
     {
-        $result = [];
-        $autoDetectRules = isset($this->compositeRules[$parentRule]);
+        $rules = [];
+
+        foreach ($definitions as $field => $definition) {
+            if ($definition instanceof RuleInterface) {
+                $rules[$field] = $definition;
+                continue;
+            }
+
+            if (!is_string($definition)) {
+                throw new InvalidArgumentException(sprintf(
+                    'Rule definition for field "%s" must be a string or %s; got %s.',
+                    (string) $field,
+                    RuleInterface::class,
+                    get_debug_type($definition),
+                ));
+            }
+
+            $rules[$field] = $this->createRule($definition);
+        }
+
+        return $rules;
+    }
+
+    private function createSingleRule(string $definition): RuleInterface
+    {
+        $definition = trim($definition);
+
+        if (str_starts_with(strtolower($definition), 'regex:')) {
+            return new Regex(substr($definition, 6));
+        }
+
+        $colon = strpos($definition, ':');
+        $name = strtolower($colon === false ? $definition : substr($definition, 0, $colon));
+        $factory = $this->resolveFactory($name);
+        if ($factory === null) {
+            throw new InvalidArgumentException(sprintf('Unknown rule: "%s"', $name));
+        }
+
+        $params = $colon === false
+            ? []
+            : $this->parseParams(substr($definition, $colon + 1), $name);
+
+        return $factory($params);
+    }
+
+    /** @return callable(array): RuleInterface|null */
+    private function resolveFactory(string $name): ?callable
+    {
+        if (isset($this->factories[$name])) {
+            return $this->factories[$name];
+        }
+
+        $target = $this->aliases[$name] ?? null;
+
+        return $target === null ? null : $this->factories[$target] ?? null;
+    }
+
+    /** @return list<RuleInterface|string> */
+    private function parseParams(string $content, string $parentRule): array
+    {
+        $params = [];
+        $nested = isset($this->compositeRules[$parentRule]);
 
         foreach ($this->splitByComma($content) as $param) {
-            if ($autoDetectRules) {
-                // Extract rule name (e.g., "length:8,255" -> "length", "required" -> "required")
-                $colonPos = strpos($param, ':');
-                $ruleName = $colonPos !== false
-                    ? strtolower(substr($param, 0, $colonPos))
-                    : strtolower($param);
-
-                // Check if it's a known rule (and not purely numeric/empty)
+            if ($nested) {
+                $colon = strpos($param, ':');
+                $ruleName = strtolower($colon === false ? $param : substr($param, 0, $colon));
                 if ($ruleName !== '' && !is_numeric($ruleName) && $this->has($ruleName)) {
-                    $result[] = $this->createRule($param);
+                    $params[] = $this->createRule($param);
                     continue;
                 }
             }
 
-            $result[] = $param;
+            $params[] = $param;
         }
 
-        return $result;
+        return $params;
     }
 
-    /**
-     * Split by pipe "|", respecting regex patterns.
-     */
+    /** @return non-empty-list<string> */
     private function splitByPipe(string $content): array
     {
-        // Handle regex specially
-        if (str_starts_with($content, 'regex:')) {
+        if (str_starts_with(strtolower($content), 'regex:')) {
             $regexEnd = $this->findRegexEnd($content, 6);
-            if ($regexEnd !== false && $regexEnd < strlen($content) - 1) {
-                $regexPart = substr($content, 0, $regexEnd + 1);
-                $rest = substr($content, $regexEnd + 1);
-                if (str_starts_with($rest, '|')) {
-                    return array_merge([$regexPart], $this->splitByPipe(substr($rest, 1)));
-                }
-            }
-            return [$content];
-        }
-
-        $result = [];
-        $current = '';
-        $len = strlen($content);
-        $i = 0;
-
-        while ($i < $len) {
-            $char = $content[$i];
-
-            if ($char === '|') {
-                if ($current !== '') {
-                    $result[] = trim($current);
-                }
-                $current = '';
-                $i++;
-                continue;
+            if ($regexEnd === false || $regexEnd >= strlen($content) - 1) {
+                return [$content];
             }
 
-            $current .= $char;
-            $i++;
+            $regex = substr($content, 0, $regexEnd + 1);
+            $rest = substr($content, $regexEnd + 1);
+
+            return str_starts_with($rest, '|')
+                ? [$regex, ...$this->splitByPipe(substr($rest, 1))]
+                : [$content];
         }
 
-        if ($current !== '') {
-            $result[] = trim($current);
-        }
+        $parts = array_values(array_filter(
+            array_map('trim', explode('|', $content)),
+            static fn (string $part): bool => $part !== '',
+        ));
 
-        return $result;
+        return $parts === [] ? [''] : $parts;
     }
 
-    /**
-     * Split by comma ",", but not inside nested rules.
-     */
+    /** @return list<string> */
     private function splitByComma(string $content): array
     {
-        // Check for pipe - if present, this is a nested rule list
         if (str_contains($content, '|')) {
             return [$content];
         }
 
-        $result = [];
-        $current = '';
-        $len = strlen($content);
-
-        for ($i = 0; $i < $len; $i++) {
-            $char = $content[$i];
-
-            if ($char === ',') {
-                $result[] = trim($current);
-                $current = '';
-            } else {
-                $current .= $char;
-            }
-        }
-
-        $result[] = trim($current);
-
-        return $result;
+        return array_map('trim', explode(',', $content));
     }
 
-    /**
-     * Find end of regex pattern (closing delimiter + modifiers).
-     */
     private function findRegexEnd(string $content, int $start): int|false
     {
-        $len = strlen($content);
-        if ($start >= $len) {
+        if (!isset($content[$start])) {
             return false;
         }
 
         $delimiter = $content[$start];
-        $i = $start + 1;
+        $escaped = false;
 
-        while ($i < $len) {
-            if ($content[$i] === $delimiter && $content[$i - 1] !== '\\') {
-                // Skip modifiers
-                while (isset($content[$i + 1]) && preg_match('/[imsxADSUXJu]/', $content[$i + 1])) {
-                    $i++;
+        for ($index = $start + 1, $length = strlen($content); $index < $length; $index++) {
+            $character = $content[$index];
+            if ($character === $delimiter && !$escaped) {
+                while (isset($content[$index + 1])
+                    && preg_match('/[imsxADSUXJu]/', $content[$index + 1]) === 1
+                ) {
+                    $index++;
                 }
-                return $i;
+
+                return $index;
             }
-            $i++;
+
+            $escaped = $character === '\\' && !$escaped;
+            if ($character !== '\\') {
+                $escaped = false;
+            }
         }
 
         return false;
@@ -319,33 +295,30 @@ final class RuleFactory implements RuleFactoryInterface
 
     private function registerDefaults(): void
     {
-        // Composite (parameters are auto-detected as nested rules)
-        $this->register(['allof', 'all_of'], static fn(array $p) => new AllOf(...$p), composite: true);
-        $this->register(['oneof', 'one_of'], static fn(array $p) => new OneOf(...$p), composite: true);
-        $this->register(['arrayof', 'array_of'], static fn(array $p) => new ArrayOf($p[0]), composite: true);
-        $this->register(['ifthen', 'if_then'], static fn(array $p) => new IfThen($p[0], $p[1], $p[2] ?? null), composite: true);
+        $this->register(['allof', 'all_of'], static fn (array $params): RuleInterface => RuleComposer::all(...$params), composite: true);
+        $this->register(['oneof', 'one_of'], static fn (array $params): RuleInterface => new OneOf(...$params), composite: true);
+        $this->register(['arrayof', 'array_of'], static fn (array $params): RuleInterface => new ArrayOf(
+            $params[0] ?? throw new InvalidArgumentException('arrayof requires a nested rule.'),
+        ), composite: true);
 
-        // Basic
-        $this->factories['required'] = static fn() => new Required();
-        $this->factories['nullable'] = static fn() => new Nullable();
-        $this->factories['filled'] = static fn() => new Filled();
-        $this->factories['in'] = static fn(array $p) => new In($p);
-        $this->factories['not_in'] = static fn(array $p) => new NotIn($p);
-        $this->factories['accepted'] = static fn() => new Accepted();
+        $this->factories['required'] = static fn (): RuleInterface => new Required();
+        $this->factories['nullable'] = static fn (): RuleInterface => new Nullable();
+        $this->factories['filled'] = static fn (): RuleInterface => new Filled();
+        $this->factories['in'] = static fn (array $params): RuleInterface => new In($params);
+        $this->factories['not_in'] = static fn (array $params): RuleInterface => new NotIn($params);
+        $this->factories['accepted'] = static fn (): RuleInterface => new Accepted();
 
-        // Type
-        $this->factories['string'] = static fn() => new IsString();
-        $this->factories['int'] = static fn(array $p) => new IsInt(
-            isset($p[0]) && in_array(strtolower((string) $p[0]), ['true', '1', 'strict'], true)
+        $this->factories['string'] = static fn (): RuleInterface => new IsString();
+        $this->factories['int'] = static fn (array $params): RuleInterface => new IsInt(
+            isset($params[0]) && in_array(strtolower((string) $params[0]), ['true', '1', 'strict'], true),
         );
-        $this->factories['array'] = static fn(array $p) => new IsArray(
-            isset($p[0]) && in_array(strtolower((string) $p[0]), ['true', '1', 'list'], true)
+        $this->factories['array'] = static fn (array $params): RuleInterface => new IsArray(
+            isset($params[0]) && in_array(strtolower((string) $params[0]), ['true', '1', 'list'], true),
         );
-        $this->factories['numeric'] = static fn() => new Numeric();
-        $this->factories['boolean'] = static fn(array $p) => new IsBoolean(
-            isset($p[0]) && in_array(strtolower((string) $p[0]), ['true', '1', 'strict'], true)
+        $this->factories['numeric'] = static fn (): RuleInterface => new Numeric();
+        $this->factories['boolean'] = static fn (array $params): RuleInterface => new IsBoolean(
+            isset($params[0]) && in_array(strtolower((string) $params[0]), ['true', '1', 'strict'], true),
         );
-
         $this->alias('integer', 'int');
         $this->alias('is_int', 'int');
         $this->alias('is_string', 'string');
@@ -353,195 +326,176 @@ final class RuleFactory implements RuleFactoryInterface
         $this->alias('bool', 'boolean');
         $this->alias('is_bool', 'boolean');
 
-        // String
-        $this->factories['email'] = static fn() => new Email();
-        $this->factories['url'] = static fn(array $p) => empty($p) ? new Url() : new Url($p);
-        $this->factories['regex'] = static fn(array $p) => new Regex((string) ($p[0] ?? '//'));
-        $this->factories['uuid'] = static fn(array $p) => new Uuid(
-            isset($p[0]) && $p[0] !== '' ? (int) $p[0] : null
+        $this->factories['email'] = static fn (): RuleInterface => new Email();
+        $this->factories['url'] = static fn (array $params): RuleInterface => $params === [] ? new Url() : new Url($params);
+        $this->factories['regex'] = static fn (array $params): RuleInterface => new Regex((string) ($params[0] ?? '//'));
+        $this->factories['uuid'] = static fn (array $params): RuleInterface => new Uuid(
+            isset($params[0]) && $params[0] !== '' ? (int) $params[0] : null,
         );
-        $this->factories['alpha'] = static fn(array $p) => new Alpha(
-            isset($p[0]) && in_array(strtolower((string) $p[0]), ['true', '1', 'ascii'], true)
+        $this->factories['alpha'] = static fn (array $params): RuleInterface => new Alpha(
+            isset($params[0]) && in_array(strtolower((string) $params[0]), ['true', '1', 'ascii'], true),
         );
-        $this->factories['alpha_num'] = static fn(array $p) => new AlphaNumeric(
-            isset($p[0]) && in_array(strtolower((string) $p[0]), ['true', '1', 'ascii'], true)
+        $this->factories['alpha_num'] = static fn (array $params): RuleInterface => new AlphaNumeric(
+            isset($params[0]) && in_array(strtolower((string) $params[0]), ['true', '1', 'ascii'], true),
         );
-        $this->factories['alpha_dash'] = static fn(array $p) => new AlphaDash(
-            isset($p[0]) && in_array(strtolower((string) $p[0]), ['true', '1', 'ascii'], true)
+        $this->factories['alpha_dash'] = static fn (array $params): RuleInterface => new AlphaDash(
+            isset($params[0]) && in_array(strtolower((string) $params[0]), ['true', '1', 'ascii'], true),
         );
-        $this->factories['length'] = static fn(array $p) => new Length(
-            min: isset($p[0]) && $p[0] !== '' ? (int) $p[0] : null,
-            max: isset($p[1]) && $p[1] !== '' ? (int) $p[1] : null,
+        $this->factories['length'] = static fn (array $params): RuleInterface => new Length(
+            min: isset($params[0]) && $params[0] !== '' ? (int) $params[0] : null,
+            max: isset($params[1]) && $params[1] !== '' ? (int) $params[1] : null,
         );
-        $this->factories['phone'] = static fn(array $p) => new Phone(
-            isset($p[0]) && $p[0] !== '' ? (string) $p[0] : null,
-        );
-
-        // Numeric
-        $this->factories['range'] = fn(array $p) => new Range(
-            min: isset($p[0]) && $p[0] !== '' ? $this->toNumber((string) $p[0]) : null,
-            max: isset($p[1]) && $p[1] !== '' ? $this->toNumber((string) $p[1]) : null,
+        $this->factories['phone'] = static fn (array $params): RuleInterface => new Phone(
+            isset($params[0]) && $params[0] !== '' ? (string) $params[0] : null,
         );
 
-        // `min:N` / `max:N` - one-bound shortcuts over `Range`. Numeric +
-        // date semantics mirror `range`. NOT polymorphic on the value type
-        // (Laravel-style):
-        //   - Strings: use `length:lo[,hi]` (length-based bound)
-        //   - Arrays:  use `count:lo[,hi]`  (size-based bound)
-        // A non-numeric value silently fails the predicate - same behaviour
-        // as `range:N,`. Added as a DX convenience after a recurring bug
-        // where authors instinctively wrote `min:0|max:50` and hit
-        // "Unknown rule".
-        $this->factories['min'] = fn(array $p) => new Range(
-            min: isset($p[0]) && $p[0] !== '' ? $this->toNumber((string) $p[0]) : null,
+        $this->factories['range'] = fn (array $params): RuleInterface => new Range(
+            min: isset($params[0]) && $params[0] !== '' ? $this->toNumber((string) $params[0]) : null,
+            max: isset($params[1]) && $params[1] !== '' ? $this->toNumber((string) $params[1]) : null,
         );
-        $this->factories['max'] = fn(array $p) => new Range(
-            max: isset($p[0]) && $p[0] !== '' ? $this->toNumber((string) $p[0]) : null,
+        $this->factories['min'] = fn (array $params): RuleInterface => new Range(
+            min: isset($params[0]) && $params[0] !== '' ? $this->toNumber((string) $params[0]) : null,
         );
-
-        $this->factories['positive'] = static fn(array $p) => new Positive(
-            isset($p[0]) && in_array(strtolower((string) $p[0]), ['true', '1'], true)
+        $this->factories['max'] = fn (array $params): RuleInterface => new Range(
+            max: isset($params[0]) && $params[0] !== '' ? $this->toNumber((string) $params[0]) : null,
         );
-        $this->factories['negative'] = static fn(array $p) => new Negative(
-            isset($p[0]) && in_array(strtolower((string) $p[0]), ['true', '1'], true)
+        $this->factories['positive'] = static fn (array $params): RuleInterface => new Positive(
+            isset($params[0]) && in_array(strtolower((string) $params[0]), ['true', '1'], true),
+        );
+        $this->factories['negative'] = static fn (array $params): RuleInterface => new Negative(
+            isset($params[0]) && in_array(strtolower((string) $params[0]), ['true', '1'], true),
         );
 
-        // Comparison
-        $this->factories['equals'] = static fn(array $p) => new Equals(
-            (string) ($p[0] ?? throw new InvalidArgumentException('equals requires field')),
-            !isset($p[1]) || !in_array(strtolower((string) $p[1]), ['false', '0'], true),
+        $this->factories['equals'] = static fn (array $params): RuleInterface => new Equals(
+            (string) ($params[0] ?? throw new InvalidArgumentException('equals requires field.')),
+            !isset($params[1]) || !in_array(strtolower((string) $params[1]), ['false', '0'], true),
         );
-        $this->factories['not_equals'] = static fn(array $p) => new NotEquals(
-            (string) ($p[0] ?? throw new InvalidArgumentException('not_equals requires field')),
-            !isset($p[1]) || !in_array(strtolower((string) $p[1]), ['false', '0'], true),
+        $this->factories['not_equals'] = static fn (array $params): RuleInterface => new NotEquals(
+            (string) ($params[0] ?? throw new InvalidArgumentException('not_equals requires field.')),
+            !isset($params[1]) || !in_array(strtolower((string) $params[1]), ['false', '0'], true),
         );
-        $this->factories['gt'] = static fn(array $p) => new GreaterThan(
-            (string) ($p[0] ?? throw new InvalidArgumentException('gt requires field')),
-            isset($p[1]) && in_array(strtolower((string) $p[1]), ['true', '1'], true),
+        $this->factories['gt'] = static fn (array $params): RuleInterface => new GreaterThan(
+            (string) ($params[0] ?? throw new InvalidArgumentException('gt requires field.')),
+            isset($params[1]) && in_array(strtolower((string) $params[1]), ['true', '1'], true),
         );
-        $this->factories['gte'] = static fn(array $p) => new GreaterThan(
-            (string) ($p[0] ?? throw new InvalidArgumentException('gte requires field')),
+        $this->factories['gte'] = static fn (array $params): RuleInterface => new GreaterThan(
+            (string) ($params[0] ?? throw new InvalidArgumentException('gte requires field.')),
             orEqual: true,
         );
-        $this->factories['lt'] = static fn(array $p) => new LessThan(
-            (string) ($p[0] ?? throw new InvalidArgumentException('lt requires field')),
-            isset($p[1]) && in_array(strtolower((string) $p[1]), ['true', '1'], true),
+        $this->factories['lt'] = static fn (array $params): RuleInterface => new LessThan(
+            (string) ($params[0] ?? throw new InvalidArgumentException('lt requires field.')),
+            isset($params[1]) && in_array(strtolower((string) $params[1]), ['true', '1'], true),
         );
-        $this->factories['lte'] = static fn(array $p) => new LessThan(
-            (string) ($p[0] ?? throw new InvalidArgumentException('lte requires field')),
+        $this->factories['lte'] = static fn (array $params): RuleInterface => new LessThan(
+            (string) ($params[0] ?? throw new InvalidArgumentException('lte requires field.')),
             orEqual: true,
         );
-        $this->factories['confirmed'] = static fn(array $p) => new Confirmed((string) ($p[0] ?? 'confirmation'));
+        $this->factories['confirmed'] = static fn (array $params): RuleInterface => new Confirmed((string) ($params[0] ?? 'confirmation'));
 
-        // Date
-        $this->factories['date'] = static fn() => new Date();
-        $this->factories['date_format'] = static fn(array $p) => new DateFormat(
-            (string) ($p[0] ?? throw new InvalidArgumentException('date_format requires format'))
+        $this->factories['date'] = static fn (): RuleInterface => new Date();
+        $this->factories['date_format'] = static fn (array $params): RuleInterface => new DateFormat(
+            (string) ($params[0] ?? throw new InvalidArgumentException('date_format requires format.')),
         );
-        $this->factories['before'] = static fn(array $p) => new Before(
-            $p[0] ?? throw new InvalidArgumentException('before requires date'),
-            isset($p[1]) && in_array(strtolower((string) $p[1]), ['true', '1'], true),
-            isset($p[2]) && $p[2] !== '' ? (int) $p[2] : 0,
+        $this->factories['before'] = static fn (array $params): RuleInterface => new Before(
+            $params[0] ?? throw new InvalidArgumentException('before requires date.'),
+            isset($params[1]) && in_array(strtolower((string) $params[1]), ['true', '1'], true),
+            isset($params[2]) && $params[2] !== '' ? (int) $params[2] : 0,
         );
-        $this->factories['before_or_equal'] = static fn(array $p) => new Before(
-            $p[0] ?? throw new InvalidArgumentException('before_or_equal requires date'),
+        $this->factories['before_or_equal'] = static fn (array $params): RuleInterface => new Before(
+            $params[0] ?? throw new InvalidArgumentException('before_or_equal requires date.'),
             orEqual: true,
-            graceMinutes: isset($p[1]) && $p[1] !== '' ? (int) $p[1] : 0,
+            graceMinutes: isset($params[1]) && $params[1] !== '' ? (int) $params[1] : 0,
         );
-        $this->factories['after'] = static fn(array $p) => new After(
-            $p[0] ?? throw new InvalidArgumentException('after requires date'),
-            isset($p[1]) && in_array(strtolower((string) $p[1]), ['true', '1'], true),
-            isset($p[2]) && $p[2] !== '' ? (int) $p[2] : 0,
+        $this->factories['after'] = static fn (array $params): RuleInterface => new After(
+            $params[0] ?? throw new InvalidArgumentException('after requires date.'),
+            isset($params[1]) && in_array(strtolower((string) $params[1]), ['true', '1'], true),
+            isset($params[2]) && $params[2] !== '' ? (int) $params[2] : 0,
         );
-        $this->factories['after_or_equal'] = static fn(array $p) => new After(
-            $p[0] ?? throw new InvalidArgumentException('after_or_equal requires date'),
+        $this->factories['after_or_equal'] = static fn (array $params): RuleInterface => new After(
+            $params[0] ?? throw new InvalidArgumentException('after_or_equal requires date.'),
             orEqual: true,
-            graceMinutes: isset($p[1]) && $p[1] !== '' ? (int) $p[1] : 0,
+            graceMinutes: isset($params[1]) && $params[1] !== '' ? (int) $params[1] : 0,
         );
 
-        // Array
-        $this->factories['count'] = static fn(array $p) => new Count(
-            min: isset($p[0]) && $p[0] !== '' ? (int) $p[0] : null,
-            max: isset($p[1]) && $p[1] !== '' ? (int) $p[1] : null,
+        $this->factories['count'] = static fn (array $params): RuleInterface => new Count(
+            min: isset($params[0]) && $params[0] !== '' ? (int) $params[0] : null,
+            max: isset($params[1]) && $params[1] !== '' ? (int) $params[1] : null,
         );
-        $this->factories['distinct'] = static fn(array $p) => new Distinct(
-            isset($p[0]) && $p[0] !== '' ? (string) $p[0] : null
+        $this->factories['distinct'] = static fn (array $params): RuleInterface => new Distinct(
+            isset($params[0]) && $params[0] !== '' ? (string) $params[0] : null,
         );
 
-        // Conditional
-        $this->factories['required_if'] = fn(array $p) => new RequiredIf(
-            (string) ($p[0] ?? throw new InvalidArgumentException('required_if requires field')),
-            $this->castValue((string) ($p[1] ?? throw new InvalidArgumentException('required_if requires value'))),
+        $this->factories['required_if'] = fn (array $params): RuleInterface => new RequiredIf(
+            (string) ($params[0] ?? throw new InvalidArgumentException('required_if requires field.')),
+            $this->castValue((string) ($params[1] ?? throw new InvalidArgumentException('required_if requires value.'))),
         );
-        $this->factories['required_with'] = static fn(array $p) => empty($p)
-            ? throw new InvalidArgumentException('required_with requires fields')
-            : new RequiredWith(array_map('strval', $p));
-        $this->factories['required_without'] = static fn(array $p) => empty($p)
-            ? throw new InvalidArgumentException('required_without requires fields')
-            : new RequiredWithout(array_map('strval', $p));
-        $this->factories['prohibited_if'] = fn(array $p) => new ProhibitedIf(
-            (string) ($p[0] ?? throw new InvalidArgumentException('prohibited_if requires field')),
-            $this->castValue((string) ($p[1] ?? throw new InvalidArgumentException('prohibited_if requires value'))),
+        $this->factories['required_with'] = static fn (array $params): RuleInterface => $params === []
+            ? throw new InvalidArgumentException('required_with requires fields.')
+            : new RequiredWith(array_map('strval', $params));
+        $this->factories['required_without'] = static fn (array $params): RuleInterface => $params === []
+            ? throw new InvalidArgumentException('required_without requires fields.')
+            : new RequiredWithout(array_map('strval', $params));
+        $this->factories['prohibited_if'] = fn (array $params): RuleInterface => new ProhibitedIf(
+            (string) ($params[0] ?? throw new InvalidArgumentException('prohibited_if requires field.')),
+            $this->castValue((string) ($params[1] ?? throw new InvalidArgumentException('prohibited_if requires value.'))),
         );
-        $this->factories['exclude_if'] = fn(array $p) => new ExcludeIf(
-            (string) ($p[0] ?? throw new InvalidArgumentException('exclude_if requires field')),
-            $this->castValue((string) ($p[1] ?? throw new InvalidArgumentException('exclude_if requires value'))),
+        $this->factories['exclude_if'] = fn (array $params): RuleInterface => new ExcludeIf(
+            (string) ($params[0] ?? throw new InvalidArgumentException('exclude_if requires field.')),
+            $this->castValue((string) ($params[1] ?? throw new InvalidArgumentException('exclude_if requires value.'))),
         );
-        $this->factories['when'] = fn(array $p) => $this->createWhenRule($p);
+        $this->factories['when'] = fn (array $params): RuleInterface => $this->createWhenRule($params);
 
-        // Password
-        $this->factories['password'] = fn(array $p) => new Password(
-            min: isset($p[0]) && $p[0] !== '' ? (int) $p[0] : 8,
-            flags: isset($p[1]) && $p[1] !== ''
-                ? $this->parsePasswordFlags((string) $p[1])
+        $this->factories['password'] = fn (array $params): RuleInterface => new Password(
+            min: isset($params[0]) && $params[0] !== '' ? (int) $params[0] : 8,
+            flags: isset($params[1]) && $params[1] !== ''
+                ? $this->parsePasswordFlags((string) $params[1])
                 : Password::REQUIRE_UPPER | Password::REQUIRE_LOWER | Password::REQUIRE_DIGIT | Password::REQUIRE_SPECIAL,
-            confirmationField: isset($p[2]) && $p[2] !== '' ? (string) $p[2] : null,
+            confirmationField: isset($params[2]) && $params[2] !== '' ? (string) $params[2] : null,
         );
 
-        // File
-        $this->factories['uploaded_file'] = static fn() => new UploadedFile();
-        $this->factories['file_size'] = static fn(array $p) => new FileSize(
-            max: FileSize::parseSize((string) ($p[0] ?? throw new InvalidArgumentException('file_size requires max size'))),
-            min: isset($p[1]) && $p[1] !== '' ? FileSize::parseSize((string) $p[1]) : 0,
+        $this->factories['uploaded_file'] = static fn (): RuleInterface => new UploadedFile();
+        $this->factories['file_size'] = static fn (array $params): RuleInterface => new FileSize(
+            max: FileSize::parseSize((string) ($params[0] ?? throw new InvalidArgumentException('file_size requires max size.'))),
+            min: isset($params[1]) && $params[1] !== '' ? FileSize::parseSize((string) $params[1]) : 0,
         );
 
         if ($this->detector !== null) {
-            $this->factories['mime_type'] = fn(array $p) => empty($p)
-                ? throw new InvalidArgumentException('mime_type requires at least one type')
-                : new MimeType($this->detector, $p);
+            $this->factories['mime_type'] = fn (array $params): RuleInterface => $params === []
+                ? throw new InvalidArgumentException('mime_type requires at least one type.')
+                : new MimeType($this->detector, array_map('strval', $params));
         }
 
-        $this->factories['file'] = function (array $p): RuleInterface {
+        $this->factories['file'] = function (array $params): RuleInterface {
             $rules = [new UploadedFile()];
-
-            if (isset($p[0]) && $p[0] !== '' && $p[0] !== '0') {
-                $rules[] = new FileSize(max: FileSize::parseSize((string) $p[0]));
+            if (isset($params[0]) && $params[0] !== '' && $params[0] !== '0') {
+                $rules[] = new FileSize(max: FileSize::parseSize((string) $params[0]));
             }
 
-            $mimeTypes = array_filter(
-                array_slice($p, 1),
-                static fn(string $v): bool => str_contains($v, '/'),
-            );
+            $mimeTypes = array_values(array_filter(
+                array_map('strval', array_slice($params, 1)),
+                static fn (string $value): bool => str_contains($value, '/'),
+            ));
+            if ($mimeTypes !== []) {
+                if ($this->detector === null) {
+                    throw new InvalidArgumentException('The file rule requires a MIME detector when MIME types are configured.');
+                }
 
-            if ($mimeTypes !== [] && $this->detector !== null) {
-                $rules[] = new MimeType($this->detector, array_values($mimeTypes));
+                $rules[] = new MimeType($this->detector, $mimeTypes);
             }
 
-            return count($rules) === 1 ? $rules[0] : new AllOf(...$rules);
+            return count($rules) === 1 ? $rules[0] : new Sequential(...$rules);
         };
 
-        // Database
         if ($this->database !== null) {
-            $this->factories['exists'] = fn(array $p) => new Exists(
+            $this->factories['exists'] = fn (array $params): RuleInterface => new Exists(
                 $this->database,
-                (string) ($p[0] ?? throw new InvalidArgumentException('exists requires table')),
-                (string) ($p[1] ?? 'id'),
+                (string) ($params[0] ?? throw new InvalidArgumentException('exists requires table.')),
+                (string) ($params[1] ?? 'id'),
             );
-
-            $this->factories['unique'] = fn(array $p) => new Unique(
+            $this->factories['unique'] = fn (array $params): RuleInterface => new Unique(
                 $this->database,
-                (string) ($p[0] ?? throw new InvalidArgumentException('unique requires table')),
-                (string) ($p[1] ?? 'id'),
+                (string) ($params[0] ?? throw new InvalidArgumentException('unique requires table.')),
+                (string) ($params[1] ?? 'id'),
             );
         }
     }
@@ -583,29 +537,17 @@ final class RuleFactory implements RuleFactoryInterface
         return $result;
     }
 
-    /**
-     * Create When rule from parsed parameters.
-     *
-     * Expected params: [condition, thenRules, elseRules?]
-     * Condition format: "field:value"
-     */
-    private function createWhenRule(array $p): When
+    /** @param list<RuleInterface|string> $params */
+    private function createWhenRule(array $params): When
     {
-        $condition = (string) ($p[0] ?? throw new InvalidArgumentException('when requires condition (field:value)'));
-        $thenRules = (string) ($p[1] ?? throw new InvalidArgumentException('when requires then rules'));
-        $elseRules = isset($p[2]) && $p[2] !== '' ? (string) $p[2] : null;
+        $condition = (string) ($params[0] ?? throw new InvalidArgumentException('when requires condition (field:value).'));
+        $then = (string) ($params[1] ?? throw new InvalidArgumentException('when requires then rules.'));
+        $else = isset($params[2]) && $params[2] !== '' ? (string) $params[2] : null;
 
         return new When(
             $condition,
-            $this->createRule($thenRules),
-            $elseRules !== null ? $this->createRule($elseRules) : new Nullable(),
+            $this->createRule($then),
+            $else === null ? new Nullable() : $this->createRule($else),
         );
-    }
-
-    public function createRules(array $definitions): array
-    {
-        return array_map(function ($definition) {
-            return $definition instanceof RuleInterface ? $definition : $this->createRule($definition);
-        }, $definitions);
     }
 }

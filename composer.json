@@ -1,12 +1,13 @@
 {
     "name": "componenta/validation",
-    "description": "Flexible validation library with attribute-based rules, multiple provider strategies, and comprehensive error handling",
+    "description": "Flexible validation library with attribute-based rules, compiled metadata, multiple provider strategies, and comprehensive error handling",
     "type": "library",
     "license": "MIT",
     "keywords": [
         "validation",
         "validator",
         "attributes",
+        "compiled-validation",
         "rules",
         "validation-provider",
         "php84"
@@ -14,20 +15,38 @@
     "require": {
         "php": "^8.4",
         "componenta/arrayable": "^1.0",
-        "componenta/config": "^2.0",
+        "componenta/config": "^2.0.1",
         "componenta/mimetype-detector": "^1.0",
         "cycle/database": "^2.15",
+        "giggsey/libphonenumber-for-php": "^9.0",
         "psr/container": "^2.0",
         "psr/http-message": "^2.0"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^12.0"
     },
     "autoload": {
         "psr-4": {
             "Componenta\\Validation\\": "src/"
         }
     },
+    "autoload-dev": {
+        "psr-4": {
+            "Componenta\\Validation\\Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "test": "@php vendor/bin/phpunit"
+    },
+    "config": {
+        "sort-packages": true
+    },
     "minimum-stability": "stable",
     "prefer-stable": true,
     "extra": {
+        "branch-alias": {
+            "dev-v2": "2.x-dev"
+        },
         "componenta": {
             "config-providers": [
                 "Componenta\\Validation\\ConfigProvider"

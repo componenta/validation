@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Componenta\Validation\Rule;
 
 use Componenta\Validation\ContextInterface;
@@ -8,19 +10,6 @@ use Componenta\Validation\Error\ErrorMessageCollector;
 use Componenta\Validation\Error\ErrorMessageCollectorInterface;
 use Cycle\Database\DatabaseInterface;
 
-/**
- * Unique rule: value must not exist in database table.
- *
- * Examples:
- *   new Unique($db, 'users', 'email')
- *
- * String syntax:
- *   "unique(users, email)"
- *
- * Attribute usage:
- *   #[Unique(table: 'users', column: 'email')]
- *   (use Componenta\Validation\Attribute\Unique)
- */
 final class Unique implements RuleInterface
 {
     public const string NOT_UNIQUE_MESSAGE_ID = 'validation.unique';
@@ -42,7 +31,7 @@ final class Unique implements RuleInterface
         }
 
         return $this->db
-            ->select('*')
+            ->select($this->column)
             ->from($this->table)
             ->where($this->column, $value)
             ->limit(1)
@@ -68,8 +57,6 @@ final class Unique implements RuleInterface
 
     public static function getMessages(): array
     {
-        return [
-            self::NOT_UNIQUE_MESSAGE_ID => 'The :attribute has already been taken.',
-        ];
+        return [self::NOT_UNIQUE_MESSAGE_ID => 'The :attribute has already been taken.'];
     }
 }
