@@ -50,7 +50,9 @@ final class RegressionTest extends TestCase
     public function testCompositesSupportValidateOnlyCustomRules(): void
     {
         $rule = new class implements RuleInterface {
-            public string $name { get => 'validate_only'; }
+            public string $name {
+                get => 'validate_only';
+            }
 
             public function validate(mixed $value, ContextInterface $context): true|ErrorMessageCollectorInterface
             {
@@ -91,6 +93,18 @@ final class RegressionTest extends TestCase
         self::assertArrayHasKey('items.0.sku', $result->toArray());
     }
 
+    public function testStrictMissingRuleModeSkipsTraversalOnlyContainers(): void
+    {
+        $validator = new Validator([
+            'items.*.sku' => new Required(),
+        ]);
+
+        self::assertTrue($validator->validate(
+            ['items' => [['sku' => 'ok']]],
+            Context::skipMissingRules(false),
+        ));
+    }
+
     public function testProgrammaticNullableAllOfAcceptsNull(): void
     {
         self::assertTrue((new AllOf(new Nullable(), new Email()))->validate(null, new Context()));
@@ -112,8 +126,10 @@ final class RegressionTest extends TestCase
     public function testMimeRuleDoesNotReadStreamAfterUploadFailure(): void
     {
         $detector = new class implements MimeTypeDetectorInterface {
-            public function detectMimeType(string|StreamInterface $content, bool $asObject = false): string|DetectedMimeType|null
-            {
+            public function detectMimeType(
+                string|StreamInterface $content,
+                bool $asObject = false,
+            ): string|DetectedMimeType|null {
                 return 'text/plain';
             }
         };
@@ -192,10 +208,26 @@ final class FailingUploadedFile implements UploadedFileInterface
     }
 
     public function moveTo(string $targetPath): void {}
-    public function getSize(): ?int { return null; }
-    public function getError(): int { return UPLOAD_ERR_NO_FILE; }
-    public function getClientFilename(): ?string { return null; }
-    public function getClientMediaType(): ?string { return null; }
+
+    public function getSize(): ?int
+    {
+        return null;
+    }
+
+    public function getError(): int
+    {
+        return UPLOAD_ERR_NO_FILE;
+    }
+
+    public function getClientFilename(): ?string
+    {
+        return null;
+    }
+
+    public function getClientMediaType(): ?string
+    {
+        return null;
+    }
 }
 
 final class CompiledDto

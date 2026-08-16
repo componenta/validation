@@ -43,9 +43,18 @@ final class Walker implements WalkerInterface
         foreach ($data as $key => $value) {
             $field = (string) $key;
             $path = $parentPath === '' ? $field : $parentPath . '.' . $field;
+            $rule = $this->resolveRule($path, $rules);
             $this->yieldedPaths[$path] = true;
 
-            yield new Target($field, $path, $this->resolveRule($path, $rules), $value);
+            // Containers that only lead to descendant rules are traversal nodes,
+            // not validation targets of their own. This preserves strict
+            // SKIP_MISSING_RULES=false behavior for paths such as items.*.sku.
+            if ($rule !== null
+                || !is_array($value)
+                || !$this->hasDescendantRule($path, $rules)
+            ) {
+                yield new Target($field, $path, $rule, $value);
+            }
 
             if (is_array($value)) {
                 yield from $this->walkData($value, $rules, $path);
@@ -172,6 +181,29 @@ final class Walker implements WalkerInterface
         }
 
         return $this->ruleCache[$path] = $best;
+    }
+
+    private function hasDescendantRule(string $path, RuleCollectorInterface $rules): bool
+    {
+        $pathSegments = explode('.', $path);
+
+        foreach (array_keys($rules->toArray()) as $pattern) {
+            $patternSegments = explode('.', $pattern);
+            if (count($patternSegments) <= count($pathSegments)) {
+                continue;
+            }
+
+            foreach ($pathSegments as $index => $segment) {
+                $patternSegment = $patternSegments[$index] ?? null;
+                if ($patternSegment !== '*' && $patternSegment !== $segment) {
+                    continue 2;
+                }
+            }
+
+            return true;
+        }
+
+        return false;
     }
 
     /** @return array<array-key, mixed> */
