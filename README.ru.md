@@ -1,6 +1,6 @@
 # Componenta Validation
 
-Библиотека валидации для PHP 8.4+. Пакет предоставляет валидаторы, композицию правил, строковый синтаксис правил, атрибуты свойств, маппинг валидаторов, иммутабельный контекст валидации, локализованные сообщения и фабрики для интеграции с фреймворком.
+Библиотека валидации для PHP 8.4+. Она предоставляет неизменяемые валидаторы, композицию правил, метаданные в атрибутах, ручные карты валидаторов, локализованные сообщения, вложенные и wildcard-пути, а также независимые от фреймворка фабрики.
 
 ## Установка
 
@@ -8,31 +8,13 @@
 composer require componenta/validation
 ```
 
-Composer-пакет устанавливает зависимости, которые нужны всем встроенным правилам.
-Если пакет подключён через `Componenta\Validation\ConfigProvider`, контейнер
-должен предоставить `Cycle\Database\DatabaseInterface` и
-`Componenta\Detector\MimeTypeDetectorInterface`, потому что стандартная фабрика
-правил создаётся с поддержкой базы данных и MIME-типов.
+Для обнаружения атрибутов в Componenta-приложении и их production-компиляции также установите:
 
-Если создавать `Componenta\Validation\Rule\RuleFactory` вручную, обе зависимости
-являются опциональными аргументами конструктора. `null` отключает правила,
-которым нужна соответствующая зависимость:
+```bash
+composer require componenta/validation-app
+```
 
-- `exists` и `unique` регистрируются только при наличии базы данных;
-- `mime_type` и MIME-проверки внутри `file` регистрируются только при наличии детектора;
-- регистрацию во фреймворке предоставляет `Componenta\Validation\ConfigProvider`.
-
-## Связанные пакеты
-
-`componenta/validation` можно использовать отдельно, но часть правил и интеграций опирается на соседние библиотеки:
-
-| Пакет | Зачем нужен здесь |
-|---|---|
-| `componenta/di` | Нужен фабрикам, когда правило или валидатор создаётся через сервис из контейнера. Библиотека использует обычные callable-фабрики и не требует специальных DI-фабрик. |
-| `cycle/database` | Предоставляет `Cycle\Database\DatabaseInterface` для правил `exists` и `unique`, которые проверяют записи в базе данных. |
-| `componenta/mimetype-detector` | Предоставляет `MimeTypeDetectorInterface` для правил `mime_type` и `file`, если MIME-тип определяется не только по имени файла. |
-| `componenta/config` | Используется `ConfigProvider`, чтобы зарегистрировать фабрики валидаторов, словари сообщений и локали во фреймворке. |
-| Сопоставление запроса из `componenta/di` | Атрибуты валидации часто используются вместе с DTO, которые создаются из HTTP-запроса через DI-маппинг. Сама валидация не зависит от HTTP. |
+Основной пакет можно использовать без `componenta/app` и `componenta/validation-app`.
 
 ## Быстрый старт
 
@@ -40,11 +22,10 @@ Composer-пакет устанавливает зависимости, кото�
 use Componenta\Validation\Rule\RuleFactory;
 use Componenta\Validation\Validator;
 
-$ruleFactory = new RuleFactory();
-
+$rules = new RuleFactory();
 $validator = new Validator([
-    'email' => $ruleFactory->createRule('required|email|length:5,255'),
-    'age' => $ruleFactory->createRule('int|range:18,120'),
+    'email' => $rules->createRule('required|email|length:5,255'),
+    'age' => $rules->createRule('int|range:18,120'),
 ]);
 
 $result = $validator->validate([
@@ -57,8 +38,7 @@ if ($result !== true) {
 }
 ```
 
-Во фреймворк-приложении можно получить `ValidatorFactoryInterface` из
-контейнера и вызвать `createFrom()` с массивом `field => rules`:
+При подключении через `ConfigProvider` внедряйте `ValidatorFactoryInterface`:
 
 ```php
 $validator = $factory->createFrom([
@@ -66,132 +46,36 @@ $validator = $factory->createFrom([
 ]);
 ```
 
-Одиночная строка правила не является определением валидатора.
+`ValidatorInterface::validate()` принимает любой iterable. Реализация материализует его один раз, поэтому массивы, перематываемые итераторы и одноразовые генераторы имеют одинаковую семантику. Метод возвращает `true` или `ErrorMessageCollectorInterface`; атрибут контекста `ContextInterface::THROW_ON_FAILURE_ATTRIBUTE` преобразует ошибку в `ValidationException`.
 
-## Контракт валидатора
+## Необязательные сервисы
 
-`ValidatorInterface::validate(iterable $data, ?ContextInterface $context = null)` возвращает:
+Поддержка базы данных и MIME необязательна. Стандартная DI-фабрика обращается к сервисам только при их наличии в контейнере:
 
-- `true`, если данные прошли проверку;
-- `ErrorMessageCollectorInterface`, если есть ошибки.
+- `Cycle\Database\DatabaseInterface` включает `exists` и `unique`;
+- `Componenta\Detector\MimeTypeDetectorInterface` включает `mime_type` и MIME-ограничения в `file`.
 
-Если `ContextInterface::THROW_ON_FAILURE_ATTRIBUTE` равен `true`, валидатор
-выбрасывает `ValidationException` вместо возврата коллектора ошибок.
+Все остальные встроенные правила работают без этих сервисов. При ручном создании `RuleFactory` обе зависимости также являются nullable-параметрами конструктора.
 
-```php
-$result = $validator->validate(['email' => 'invalid']);
+Правило `phone` входит в основной пакет. Его runtime-зависимость `giggsey/libphonenumber-for-php` объявлена непосредственно в `componenta/validation`.
 
-if ($result !== true) {
-    $result->has('email');
-    $result->get('email');
-    $result->toArray();
-}
-```
+## Пути полей и отсутствующие значения
 
-`Validator` иммутабелен. Методы `withRules()`, `withWalker()`, `withFormatter()` и `withLocale()` возвращают новый валидатор.
-
-## Пути полей и маска `*`
-
-Правила задаются по пути поля. Вложенные массивы используют точечную нотацию. Маска `*` проверяет каждый элемент на этом уровне.
+Правила индексируются путями полей. Точка обозначает вложенность, а `*` — каждый существующий элемент коллекции:
 
 ```php
 $validator = $factory->createFrom([
-    'user.email' => 'required|email',
-    'users.*.email' => 'required|email',
-    'tags.*' => 'string|length:1,50',
+    'profile.email' => 'required|email',
+    'items.*.sku' => 'required|string',
+    'items.*.tags.*' => 'string|length:1,50',
 ]);
 ```
 
-Обходчик данных сообщает ошибки по полному пути, например `users.0.email`.
+Отсутствующие вложенные листья проверяются как `null`. Например, `profile.email` не проходит `required`, когда отсутствует `profile` или `email`. Для `items.*.sku` каждый существующий элемент получает отдельную цель с отсутствующим значением, если в нём нет `sku`.
 
-## Синтаксис правил
+## Атрибуты
 
-Правила создаёт `RuleFactoryInterface`.
-
-```php
-$ruleFactory->createRule('email');
-$ruleFactory->createRule('required|email|length:5,255');
-$ruleFactory->createRule('nullable|email');
-$ruleFactory->createRule('oneof:email,phone');
-```
-
-Синтаксис:
-
-- `name`
-- `name:param1,param2`
-- `ruleA|ruleB|ruleC`
-- `regex:/^\d+$/`
-
-Правила через `|` оборачиваются в `AllOf`: должны пройти все правила. `nullable|...` обрабатывается отдельно: `null` проходит сразу, а не-null значение должно пройти остальные правила.
-
-Композитные строковые правила (`allof`, `oneof`, `arrayof`) читают параметры как вложенные правила. Остальные правила считают параметры обычными строками.
-
-## Встроенные правила
-
-| Правило | Параметры | Значение |
-|---|---|---|
-| `required` | нет | Значение должно присутствовать и быть непустым. |
-| `nullable` | нет | `null` допустим. |
-| `filled` | нет | Переданное значение не должно быть пустым. |
-| `accepted` | нет | Допускает распространённые значения согласия. |
-| `in` | `value,...` | Значение входит в список. |
-| `not_in` | `value,...` | Значение не входит в список. |
-| `string` | нет | Значение должно быть строкой. |
-| `int`, `integer` | `strict?` | Проверка целого числа, опционально строгая. |
-| `array` | `list?` | Проверка массива, опционально как списка без пропусков индексов. |
-| `numeric` | нет | Числовое значение. |
-| `boolean`, `bool` | `strict?` | Проверка логического значения, опционально строгая. |
-| `email` | нет | Email-адрес. |
-| `url` | `scheme,...?` | URL, опционально с ограничением схем. |
-| `regex` | `pattern` | Совпадение с регулярным выражением. |
-| `uuid` | `version?` | UUID, опционально конкретной версии. |
-| `alpha` | `ascii?` | Только буквы. |
-| `alpha_num` | `ascii?` | Буквы и цифры. |
-| `alpha_dash` | `ascii?` | Буквы, цифры, дефис и подчёркивание. |
-| `length` | `min?,max?` | Ограничения длины строки. |
-| `phone` | `region?` | Проверка телефонного номера. |
-| `range` | `min?,max?` | Числовой диапазон. |
-| `min` | `min` | Нижняя числовая граница. |
-| `max` | `max` | Верхняя числовая граница. |
-| `positive` | `orZero?` | Положительное число. |
-| `negative` | `orZero?` | Отрицательное число. |
-| `equals` | `field,strict?` | Равно другому полю. |
-| `not_equals` | `field,strict?` | Не равно другому полю. |
-| `gt`, `gte` | `field` | Больше / больше или равно другому полю. |
-| `lt`, `lte` | `field` | Меньше / меньше или равно другому полю. |
-| `confirmed` | `suffix?` | Совпадает с confirmation-полем. |
-| `date` | нет | Значение похоже на дату. |
-| `date_format` | `format` | Дата в точном формате. |
-| `before` | `date,orEqual?,graceMinutes?` | Дата раньше целевой. |
-| `before_or_equal` | `date,graceMinutes?` | Дата раньше или равна целевой. |
-| `after` | `date,orEqual?,graceMinutes?` | Дата позже целевой. |
-| `after_or_equal` | `date,graceMinutes?` | Дата позже или равна целевой. |
-| `count` | `min?,max?` | Размер массива или countable. |
-| `distinct` | `field?` | Значения массива уникальны. |
-| `required_if` | `field,value` | Обязательно, когда другое поле равно значению. |
-| `required_with` | `field,...` | Обязательно, когда присутствует любое из указанных полей. |
-| `required_without` | `field,...` | Обязательно, когда указанные поля отсутствуют. |
-| `prohibited_if` | `field,value` | Должно отсутствовать, когда условие совпадает. |
-| `exclude_if` | `field,value` | Исключает значение, когда условие совпадает. |
-| `when` | `field:value,then,else?` | Условные вложенные правила. |
-| `password` | `min?,flags?,confirmation?` | Проверка сложности пароля. |
-| `uploaded_file` | нет | Загруженный файл PSR-7. |
-| `file_size` | `max,min?` | Размер загруженного файла. |
-| `mime_type` | `type,...` | MIME-тип через детектор. |
-| `file` | `max?,mime,...` | Комбинированная проверка файла. |
-| `exists` | `table,column?` | Существование записи в базе. |
-| `unique` | `table,column?` | Уникальность в базе. |
-| `allof` | `rule,...` | Все вложенные правила должны пройти. |
-| `oneof` | `rule,...` | Хотя бы одно вложенное правило должно пройти. |
-| `arrayof` | `rule` | Каждый элемент массива должен пройти вложенное правило. |
-| `ifthen` | программное использование | Условный класс правила для callable-условий. В обычной строке правила безопасно выразить PHP callable нельзя. |
-
-## Атрибутная валидация
-
-`AttributeValidationProvider` строит валидаторы из атрибутов свойств класса.
-Классы атрибутов также разрешены на параметрах, чтобы другие слои фреймворка
-могли переиспользовать те же метаданные, но этот провайдер сам сканирует только
-свойства.
+В development `AttributeValidationProvider` строит определения валидаторов по атрибутам свойств:
 
 ```php
 use Componenta\Validation\Attribute\Field;
@@ -213,48 +97,80 @@ final class CreateUserCommand
 }
 ```
 
-Порядок выбора имени поля:
+Приоритет имени поля:
 
-1. `#[Field('name')]`
-2. `#[Validate(..., as: 'name')]`
-3. имя PHP-свойства
+1. `#[Field('name')]`;
+2. `#[Validate(..., as: 'name')]`;
+3. имя PHP-свойства.
 
-Типы атрибутов:
+Прямые rule-атрибуты создаются как правила. Наследники `RuleAttribute`, например `#[Exists]`, `#[Unique]` и `#[When]`, гидратируются через `RuleFactoryInterface`, поэтому правила с сервисными зависимостями получают настроенные зависимости.
 
-| Атрибут | Цель | Значение |
-|---|---|---|
-| `#[Validate]` | свойство, параметр | Строковое определение правил. `AttributeValidationProvider` читает его со свойств. |
-| `#[Field]` | свойство, параметр | Переопределяет имя поля валидации. `AttributeValidationProvider` читает его со свойств. |
-| `#[ValidatedBy]` | класс | Связывает класс с классом валидатора. |
-| `#[Exists]` | свойство, параметр | Метаданные правила exists. |
-| `#[Unique]` | свойство, параметр | Метаданные правила unique. |
-| `#[When]` | свойство, параметр, повторяемый | Метаданные условного правила. |
-| прямые атрибуты правил | свойство, параметр | Объекты правил создаются напрямую. |
+Класс может делегировать проверку отдельному validator service:
 
-Правила, которым нужны сервисы, должны использовать наследников `RuleAttribute`, чтобы настоящее правило строилось через `RuleFactory`.
+```php
+use Componenta\Validation\Attribute\ValidatedBy;
 
-## Провайдеры валидаторов
+#[ValidatedBy(CreateUserValidator::class)]
+final class CreateUserCommand
+{
+}
+```
 
-`ValidationProviderInterface` находит валидатор по идентификатору, обычно по имени класса.
+Указанный идентификатор разрешается через `ValidatorFactoryInterface::create()`, обычно из контейнера. Поэтому можно использовать явную фабрику, автоматически собираемый конкретный валидатор или интерфейс/service id, сопоставленный приложением. Одновременное объявление `#[ValidatedBy]` и правил на свойствах неоднозначно и отклоняется вместо молчаливого выбора одного источника.
 
-| Провайдер | Источник |
-|---|---|
-| `ValidatableProvider` | `ValidatableInterface::createValidator()`. |
-| `MappedValidationProvider` | `ConfigKey::VALIDATORS_MAP`. |
-| `AttributeValidationProvider` | Атрибуты свойств. |
-| `ValidatedByProvider` | `#[ValidatedBy]`. |
-| `CompositeValidationProvider` | Пробует провайдеры по порядку. |
+## Development- и production-провайдеры
 
-`ValidationProviderFactory` строит разные цепочки:
+Порядок стандартных провайдеров сохраняет приоритет явной конфигурации приложения:
 
-- разработка: `ValidatableInterface`, карта валидаторов, атрибуты, `#[ValidatedBy]`;
-- продакшен: `ValidatableInterface` и карта валидаторов.
+1. `ValidatableProvider` для `ValidatableInterface`;
+2. `MappedValidationProvider` для `ConfigKey::VALIDATORS_MAP`;
+3. `CompiledValidationProvider` для `ConfigKey::COMPILED_VALIDATORS`;
+4. reflection-обнаружение атрибутов только в development.
 
-Провайдер, который читает атрибуты через рефлексию, по умолчанию не используется в продакшене.
+`VALIDATORS_MAP` остаётся ручной картой `entry id → validator service`. `COMPILED_VALIDATORS` — версионированная карта дескрипторов, создаваемая интеграционным пакетом; это не набор сгенерированных классов валидаторов.
 
-## Свои правила
+При установленном `componenta/validation-app` команда `app:build` в development сканирует атрибуты и записывает descriptor map в кеш конфигурации приложения. В production compiled provider гидратирует правила и делегирует создание обычному `ValidatorFactoryInterface`, поэтому продолжают применяться стандартные walker, formatter, locale, пользовательская фабрика правил и явные фабрики контейнера. Сервисы из `#[ValidatedBy]` одновременно передаются DI v4 как корни autowiring-компиляции. Явные фабрики приложения имеют приоритет над сгенерированными DI-фабриками.
 
-Правило реализует `RuleInterface`.
+Интеграционный пакет помечает compiled map как обязательную вне development. Отсутствующая или несовместимая карта вызывает ошибку при создании провайдера, а не молча отключает атрибутную валидацию. Повторно запускайте `app:build` после изменения атрибутов, validator services, aliases правил или их зависимостей.
+
+## Строковый синтаксис правил
+
+`RuleFactoryInterface` поддерживает:
+
+```php
+$rules->createRule('email');
+$rules->createRule('required|email|length:5,255');
+$rules->createRule('nullable|email');
+$rules->createRule('oneof:email,phone');
+$rules->createRule('arrayof:uuid');
+```
+
+Правила через `|` объединяются в `AllOf`. Nullable-правило компонуется тем же общим механизмом, который используют атрибуты и программные коллекции правил, поэтому эквивалентные способы создания имеют одинаковое поведение.
+
+Строкового alias `ifthen` нет: безопасная строковая грамматика не может выразить произвольный callable-condition. Используйте декларативное правило `when`, атрибут `#[When]` или создавайте `IfThen` программно.
+
+## Встроенные правила
+
+Пакет содержит правила обязательности, типов, строк, чисел, сравнений, дат, массивов, условий, паролей, загрузки файлов, базы данных и композиции. Основные имена:
+
+```text
+required, nullable, filled, accepted
+string, int, array, numeric, boolean
+email, url, regex, uuid, alpha, alpha_num, alpha_dash, length, phone
+range, min, max, positive, negative
+confirmed, equals, not_equals, gt, gte, lt, lte
+date, date_format, before, before_or_equal, after, after_or_equal
+count, distinct, required_if, required_with, required_without
+prohibited_if, exclude_if, when, password
+uploaded_file, file_size, mime_type, file
+exists, unique, allof, oneof, arrayof
+```
+
+`OneOf` всегда проверяет альтернативы до первого успеха. `STOP_ON_FIRST_FAILURE_ATTRIBUTE` определяет только состав ошибок, когда не прошла ни одна альтернатива, но не меняет логический результат. Predicate-методы композитов проверяют дочерние правила через `RuleInterface::validate()`, поэтому пользовательскому правилу достаточно реализовать опубликованный интерфейс.
+
+Стандартное правило `file` проверяет статус загрузки до размера и MIME. `MimeType` отклоняет ошибочную загрузку, не вызывая `getStream()`.
+
+## Пользовательские правила
 
 ```php
 use Componenta\Validation\ContextInterface;
@@ -269,86 +185,35 @@ final class Uppercase implements RuleInterface
         get => 'uppercase';
     }
 
-    public function validate(mixed $value, ContextInterface $context): true|ErrorMessageCollectorInterface
-    {
+    public function validate(
+        mixed $value,
+        ContextInterface $context,
+    ): true|ErrorMessageCollectorInterface {
         if (is_string($value) && $value === strtoupper($value)) {
             return true;
         }
 
-        $collector = new ErrorMessageCollector();
-        $collector->add(
+        $errors = new ErrorMessageCollector();
+        $errors->add(
             (string) $context->getAttribute(ContextInterface::CURRENT_PATH_ATTRIBUTE, ''),
             new ErrorMessage($context, 'validation.uppercase.invalid'),
         );
 
-        return $collector;
+        return $errors;
     }
 }
 ```
 
-Регистрация через `RuleFactory::register()`:
+Регистрируйте пользовательское строковое правило через `RuleFactory::register()`, а aliases — через `RuleFactory::alias()`. Флаг `composite` нужен только тогда, когда параметры регистрации являются вложенными определениями правил.
 
-```php
-$ruleFactory->register('uppercase', static fn (): RuleInterface => new Uppercase());
-$ruleFactory->alias('upper', 'uppercase');
-```
+## Ключи конфигурации
 
-Для композитных правил, параметры которых нужно разбирать как вложенные правила, передайте `composite: true`.
-
-## Контекст
-
-`Context` иммутабелен. Используйте `withAttribute()` и `withAttributes()`, чтобы получить изменённый контекст.
-
-```php
-use Componenta\Validation\Context;
-use Componenta\Validation\ContextInterface;
-
-$context = new Context([
-    ContextInterface::STOP_ON_FIRST_FAILURE_ATTRIBUTE => true,
-    ContextInterface::THROW_ON_FAILURE_ATTRIBUTE => true,
-]);
-```
-
-Важные атрибуты контекста:
-
-| Атрибут | Значение |
+| Ключ | Назначение |
 |---|---|
-| `VALIDATION_DATA_ATTRIBUTE` | Исходные данные. |
-| `VALIDATION_RULES_ATTRIBUTE` | Коллекция правил. |
-| `CURRENT_PATH_ATTRIBUTE` | Текущий полный путь поля. |
-| `CURRENT_FIELD_ATTRIBUTE` | Текущее имя поля. |
-| `CURRENT_RULE_ATTRIBUTE` | Текущее имя правила. |
-| `PROCESSED_RULES_ATTRIBUTE` | Обработанные правила. |
-| `PROCESSED_FIELDS_ATTRIBUTE` | Обработанные пути полей. |
-| `SKIP_MISSING_RULES_ATTRIBUTE` | Пропускать поля без правил. |
-| `STOP_ON_FIRST_FAILURE_ATTRIBUTE` | Остановиться на первой ошибке. |
-| `THROW_ON_FAILURE_ATTRIBUTE` | Выбросить `ValidationException` при ошибке. |
-| `MESSAGE_FORMATTER_ATTRIBUTE` | Форматтер сообщений. |
-| `LOCALE_ATTRIBUTE` | Ключ локали. |
-
-## Сообщения
-
-`MessageFormatterInterface` форматирует ключи ошибок через словари. Если `ConfigKey::DICTIONARY` пустой, `MessageFormatterFactory` загружает стандартные словари для настроенных локалей.
-
-Ключи конфигурации:
-
-| Ключ | Значение |
-|---|---|
-| `ConfigKey::VALIDATORS_MAP` | Карта class -> validator. |
+| `ConfigKey::VALIDATORS_MAP` | Явная карта `entry id → validator service`. |
+| `ConfigKey::COMPILED_VALIDATORS` | Версионированная карта скомпилированных дескрипторов атрибутов. |
 | `ConfigKey::DICTIONARY` | Пользовательский словарь сообщений. |
-| `ConfigKey::USED_LOCALES` | Загружаемые локали. |
-| `ConfigKey::DEFAULT_LOCALE` | Локаль по умолчанию. |
+| `ConfigKey::USED_LOCALES` | Список загружаемых локалей. |
+| `ConfigKey::DEFAULT_LOCALE` | Локаль formatter по умолчанию. |
 
-Стандартные константы локалей: `LOCALE_EN`, `LOCALE_RU`, `LOCALE_ES`, `LOCALE_FR`, `LOCALE_DE`.
-
-## ConfigProvider
-
-`Componenta\Validation\ConfigProvider` регистрирует:
-
-- `ValidatorFactoryInterface`
-- `ValidationProviderInterface`
-- `RuleFactoryInterface`
-- `MessageFormatterInterface`
-- стандартную конфигурацию локалей
-
-Фабрика правил создаётся через обычные callable-фабрики; специальные ленивые фабрики сервисов из DI не требуются.
+Основной `ConfigProvider` регистрирует `ValidatorFactoryInterface`, `ValidationProviderInterface`, `RuleFactoryInterface`, `MessageFormatterInterface` и стандартную конфигурацию локалей.
