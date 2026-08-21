@@ -30,18 +30,15 @@ final readonly class ValidationProviderFactory
     public function __invoke(ContainerInterface $container): CompositeValidationProvider
     {
         /** @var Config $config */
-        $config = $container->get(ConfigKey::CONFIG);
+        $config = $container->get(Config::class);
         /** @var ValidatorFactoryInterface $validatorFactory */
         $validatorFactory = $container->get(ValidatorFactoryInterface::class);
         /** @var RuleFactoryInterface $ruleFactory */
         $ruleFactory = $container->get(RuleFactoryInterface::class);
 
-        $isDevelopment = $config->environment?->match(
-            'APP_ENV',
-            'development',
-            default: 'development',
-            strict: true,
-        ) ?? true;
+        $environment = $config->environment;
+        $isDevelopment = $environment === null
+            || $environment->get('APP_ENV', 'development') === 'development';
 
         $provider = new CompositeValidationProvider(
             new ValidatableProvider($validatorFactory),
