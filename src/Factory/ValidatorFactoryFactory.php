@@ -17,10 +17,8 @@ class ValidatorFactoryFactory
 {
     public function __invoke(ContainerInterface $container): ValidatorFactory
     {
-        /**
-         * @var Config $config
-         */
-        $config = $container->get(ConfigKey::CONFIG);
+        /** @var Config $config */
+        $config = $container->get(Config::class);
 
         return new ValidatorFactory(
             $container,
