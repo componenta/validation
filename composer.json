@@ -15,7 +15,7 @@
     "require": {
         "php": "^8.4",
         "componenta/arrayable": "^1.0",
-        "componenta/config": "^2.0.2",
+        "componenta/config": "^2.0.2 || ^3.0",
         "componenta/mimetype-detector": "^1.0",
         "cycle/database": "^2.15",
         "giggsey/libphonenumber-for-php": "^9.0",
