@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Componenta\Validation\Factory;
 
+use Componenta\Config\Config;
 use Componenta\Validation\ConfigKey;
 use Componenta\Validation\Formatter\Dictionary;
 use Componenta\Validation\Formatter\MessageFormatter;
@@ -18,9 +19,9 @@ final readonly class MessageFormatterFactory
 {
     public function __invoke(ContainerInterface $container): MessageFormatter
     {
-        $config = $container->get(ConfigKey::CONFIG);
+        /** @var Config $config */
+        $config = $container->get(Config::class);
 
-        // Get dictionary from config
         $dictionary = $config->array(ConfigKey::DICTIONARY, []);
 
         if ($dictionary === []) {
