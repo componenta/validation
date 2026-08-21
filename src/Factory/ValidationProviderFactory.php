@@ -38,7 +38,12 @@ final readonly class ValidationProviderFactory
 
         $environment = $config->environment;
         $isDevelopment = $environment === null
-            || $environment->get('APP_ENV', 'development') === 'development';
+            || $environment->match(
+                'APP_ENV',
+                'development',
+                default: 'development',
+                strict: true,
+            );
 
         $provider = new CompositeValidationProvider(
             new ValidatableProvider($validatorFactory),
