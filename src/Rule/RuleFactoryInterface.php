@@ -23,8 +23,8 @@ interface RuleFactoryInterface
     /**
      * Create multiple rules from field-to-definition map.
      *
-     * @param array<string, string> $definitions Map of field names to rule definitions
-     * @return array<string, RuleInterface> Map of field names to rule instances
+     * @param array<array-key, string|RuleInterface> $definitions Map of field names to rule definitions
+     * @return array<array-key, RuleInterface> Map of field names to rule instances
      */
     public function createRules(array $definitions): array;
 }

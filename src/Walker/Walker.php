@@ -12,39 +12,46 @@ use Traversable;
 /** Walks actual and missing values for exact and wildcard rule paths. */
 final class Walker implements WalkerInterface
 {
-    /** @var array<string, RuleInterface|null> */
-    private array $ruleCache = [];
-
-    /** @var array<string, true> */
-    private array $yieldedPaths = [];
-
     public function walk(iterable $data, RuleCollectorInterface $rules): Generator
     {
-        $this->ruleCache = [];
-        $this->yieldedPaths = [];
+        $ruleCache = [];
+        $yieldedPaths = [];
         $data = self::materialize($data);
 
-        yield from $this->walkData($data, $rules, '');
+        yield from $this->walkData($data, $rules, '', $ruleCache, $yieldedPaths);
 
-        foreach ($rules->toArray() as $pattern => $rule) {
+        foreach (array_keys($rules->toArray()) as $pattern) {
             yield from $this->walkMissingPattern(
                 $data,
                 explode('.', $pattern),
                 0,
                 '',
-                $rule,
+                $rules,
+                $ruleCache,
+                $yieldedPaths,
             );
         }
     }
 
-    /** @param array<array-key, mixed> $data */
-    private function walkData(array $data, RuleCollectorInterface $rules, string $parentPath): Generator
+    /**
+     * @param array<array-key, mixed> $data
+     * @param RuleCollectorInterface<RuleInterface> $rules
+     * @param array<string, RuleInterface|null> $ruleCache
+     * @param array<string, true> $yieldedPaths
+     */
+    private function walkData(
+        array $data,
+        RuleCollectorInterface $rules,
+        string $parentPath,
+        array &$ruleCache,
+        array &$yieldedPaths,
+    ): Generator
     {
         foreach ($data as $key => $value) {
             $field = (string) $key;
             $path = $parentPath === '' ? $field : $parentPath . '.' . $field;
-            $rule = $this->resolveRule($path, $rules);
-            $this->yieldedPaths[$path] = true;
+            $rule = $this->resolveRule($path, $rules, $ruleCache);
+            $yieldedPaths[$path] = true;
 
             // Containers that only lead to descendant rules are traversal nodes,
             // not validation targets of their own. This preserves strict
@@ -57,7 +64,7 @@ final class Walker implements WalkerInterface
             }
 
             if (is_array($value)) {
-                yield from $this->walkData($value, $rules, $path);
+                yield from $this->walkData($value, $rules, $path, $ruleCache, $yieldedPaths);
             }
         }
     }
@@ -65,13 +72,18 @@ final class Walker implements WalkerInterface
     /**
      * @param array<array-key, mixed>|mixed $value
      * @param list<string> $segments
+     * @param RuleCollectorInterface<RuleInterface> $rules
+     * @param array<string, RuleInterface|null> $ruleCache
+     * @param array<string, true> $yieldedPaths
      */
     private function walkMissingPattern(
         mixed $value,
         array $segments,
         int $index,
         string $parentPath,
-        RuleInterface $rule,
+        RuleCollectorInterface $rules,
+        array &$ruleCache,
+        array &$yieldedPaths,
     ): Generator {
         $segment = $segments[$index] ?? null;
         if ($segment === null) {
@@ -96,7 +108,9 @@ final class Walker implements WalkerInterface
                     $segments,
                     $index + 1,
                     $path,
-                    $rule,
+                    $rules,
+                    $ruleCache,
+                    $yieldedPaths,
                 );
             }
 
@@ -111,7 +125,9 @@ final class Walker implements WalkerInterface
                     $segments,
                     $index + 1,
                     $path,
-                    $rule,
+                    $rules,
+                    $ruleCache,
+                    $yieldedPaths,
                 );
             }
 
@@ -127,22 +143,31 @@ final class Walker implements WalkerInterface
             ? implode('.', $remaining)
             : $parentPath . '.' . implode('.', $remaining);
 
-        if (isset($this->yieldedPaths[$missingPath])) {
+        if (isset($yieldedPaths[$missingPath])) {
             return;
         }
 
-        $this->yieldedPaths[$missingPath] = true;
-        yield new Target($segments[array_key_last($segments)], $missingPath, $rule, null);
+        $yieldedPaths[$missingPath] = true;
+        yield new Target(
+            $segments[array_key_last($segments)],
+            $missingPath,
+            $this->resolveRule($missingPath, $rules, $ruleCache),
+            null,
+        );
     }
 
-    private function resolveRule(string $path, RuleCollectorInterface $rules): ?RuleInterface
+    /**
+     * @param RuleCollectorInterface<RuleInterface> $rules
+     * @param array<string, RuleInterface|null> $ruleCache
+     */
+    private function resolveRule(string $path, RuleCollectorInterface $rules, array &$ruleCache): ?RuleInterface
     {
-        if (array_key_exists($path, $this->ruleCache)) {
-            return $this->ruleCache[$path];
+        if (array_key_exists($path, $ruleCache)) {
+            return $ruleCache[$path];
         }
 
         if ($rules->has($path)) {
-            return $this->ruleCache[$path] = $rules->get($path);
+            return $ruleCache[$path] = $rules->get($path);
         }
 
         $pathSegments = explode('.', $path);
@@ -180,7 +205,7 @@ final class Walker implements WalkerInterface
             }
         }
 
-        return $this->ruleCache[$path] = $best;
+        return $ruleCache[$path] = $best;
     }
 
     private function hasDescendantRule(string $path, RuleCollectorInterface $rules): bool

@@ -37,6 +37,44 @@ final class RuleFactoryTest extends TestCase
         self::assertInstanceOf(ErrorMessageCollectorInterface::class, $rule->validate('', $context));
     }
 
+    public function testRegexAlternationInsideAPipeCompositionPreservesThePattern(): void
+    {
+        $validator = new \Componenta\Validation\Validator([
+            'name' => (new RuleFactory())->createRule('required | regex:/^(foo|bar|longer)$/i | length:3,3'),
+        ]);
+
+        self::assertTrue($validator->validate(['name' => 'foo']));
+        self::assertTrue($validator->validate(['name' => 'BAR']));
+        self::assertInstanceOf(ErrorMessageCollectorInterface::class, $validator->validate(['name' => 'baz']));
+        self::assertInstanceOf(ErrorMessageCollectorInterface::class, $validator->validate(['name' => 'longer']));
+        self::assertInstanceOf(ErrorMessageCollectorInterface::class, $validator->validate(['name' => '']));
+    }
+
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('delimitedPatterns')]
+    public function testDelimitedRegexKeepsFollowingPipeRules(string $pattern): void
+    {
+        $validator = new \Componenta\Validation\Validator([
+            'name' => (new RuleFactory())->createRule('required|regex:' . $pattern . '|length:3,3'),
+        ]);
+
+        self::assertTrue($validator->validate(['name' => 'foo']));
+        self::assertTrue($validator->validate(['name' => 'BAR']));
+        self::assertInstanceOf(ErrorMessageCollectorInterface::class, $validator->validate(['name' => 'baz']));
+        self::assertInstanceOf(ErrorMessageCollectorInterface::class, $validator->validate(['name' => 'longer']));
+    }
+
+    public static function delimitedPatterns(): iterable
+    {
+        yield 'slash' => ['/^(foo|bar|longer)$/i'];
+        yield 'braces' => ['{^(foo|bar|longer)$}i'];
+        yield 'parentheses' => ['(^(foo|bar|longer)$)i'];
+        yield 'brackets' => ['[^(foo|bar|longer)$]i'];
+        yield 'angles' => ['<^(foo|bar|longer)$>i'];
+        yield 'nested braces' => ['{^(fo{2}|bar|longer)$}i'];
+        yield 'leading pattern whitespace' => [' /^(foo|bar|longer)$/i'];
+    }
+
     public function testNullablePipeRulesValidateOnlyNonNullValues(): void
     {
         $factory = new RuleFactory();

@@ -10,13 +10,11 @@ use Componenta\Validation\Attribute\Validate;
 use Componenta\Validation\Attribute\ValidatedBy;
 use Componenta\Validation\Context;
 use Componenta\Validation\ContextInterface;
-use Componenta\Validation\Definition\AttributeValidatorDefinitionExtractor;
-use Componenta\Validation\Definition\ValidatorDefinitionFactory;
+use Componenta\Validation\Provider\AttributeValidationProvider;
 use Componenta\Validation\Error\ErrorMessageCollector;
 use Componenta\Validation\Error\ErrorMessageCollectorInterface;
 use Componenta\Validation\Factory\RuleFactoryFactory;
 use Componenta\Validation\Factory\ValidatorFactory;
-use Componenta\Validation\Provider\CompiledValidationProvider;
 use Componenta\Validation\Rule\AllOf;
 use Componenta\Validation\Rule\ArrayOf;
 use Componenta\Validation\Rule\Email;
@@ -105,6 +103,34 @@ final class RegressionTest extends TestCase
         ));
     }
 
+    #[\PHPUnit\Framework\Attributes\DataProvider('overlappingMissingRules')]
+    public function testMissingValuesUseTheMostSpecificRule(string $generic, string $specific, bool $required): void
+    {
+        $rules = [
+            $generic => $required ? new Nullable() : new Required(),
+            $specific => $required ? new Required() : new Nullable(),
+        ];
+
+        foreach ([$rules, array_reverse($rules, true)] as $registrations) {
+            $result = (new Validator($registrations))->validate(['items' => [[]]]);
+
+            if ($required) {
+                self::assertInstanceOf(ErrorMessageCollectorInterface::class, $result);
+                self::assertSame(['items.0.name'], array_keys($result->toArray()));
+            } else {
+                self::assertSame(true, $result);
+            }
+        }
+    }
+
+    public static function overlappingMissingRules(): iterable
+    {
+        yield 'exact optional field' => ['items.*.name', 'items.0.name', false];
+        yield 'exact required field' => ['items.*.name', 'items.0.name', true];
+        yield 'more specific optional wildcard' => ['*.*.name', 'items.*.name', false];
+        yield 'more specific required wildcard' => ['*.*.name', 'items.*.name', true];
+    }
+
     public function testProgrammaticNullableAllOfAcceptsNull(): void
     {
         self::assertTrue((new AllOf(new Nullable(), new Email()))->validate(null, new Context()));
@@ -141,40 +167,32 @@ final class RegressionTest extends TestCase
         self::assertFalse($upload->streamRequested);
     }
 
-    public function testCompiledDefinitionsReuseTheDefaultValidator(): void
+    public function testAttributeRulesUseTheDefaultValidator(): void
     {
-        $extractor = new AttributeValidatorDefinitionExtractor();
-        $definition = $extractor->extract(CompiledDto::class);
-        self::assertIsArray($definition);
-
-        $container = new TestContainer();
-        $ruleFactory = new RuleFactory();
-        $validatorFactory = new ValidatorFactory($container, $ruleFactory);
-        $provider = new CompiledValidationProvider([
-            'version' => 1,
-            'validators' => [CompiledDto::class => $definition],
-        ], $validatorFactory, new ValidatorDefinitionFactory($ruleFactory));
-
-        self::assertTrue($provider->provide(CompiledDto::class)?->validate([
-            'email' => 'user@example.com',
-        ]));
+        $rules = new RuleFactory();
+        $provider = new AttributeValidationProvider(new ValidatorFactory(new TestContainer(), $rules), $rules);
+        self::assertTrue($provider->provide(AttributeRulesDto::class)?->validate(['email' => 'user@example.com']));
     }
 
-    public function testValidatedByIsRepresentedAsAValidatorService(): void
+    public function testValidatedByResolvesTheConfiguredValidator(): void
     {
-        $definition = (new AttributeValidatorDefinitionExtractor())->extract(DelegatedDto::class);
-
-        self::assertSame([
-            'kind' => 'validator',
-            'class' => DelegatedValidator::class,
-        ], $definition);
+        $validator = new DelegatedValidator();
+        $rules = new RuleFactory();
+        $provider = new AttributeValidationProvider(
+            new ValidatorFactory(new TestContainer([DelegatedValidator::class => $validator]), $rules), $rules,
+        );
+        self::assertSame($validator, $provider->provide(DelegatedDto::class));
     }
 
     public function testValidatedByCannotBeCombinedWithPropertyRules(): void
     {
+        $rules = new RuleFactory();
+        $provider = new AttributeValidationProvider(new ValidatorFactory(new TestContainer(), $rules), $rules);
         $this->expectException(InvalidArgumentException::class);
-        (new AttributeValidatorDefinitionExtractor())->extract(ConflictingDto::class);
+        $this->expectExceptionMessage('cannot combine');
+        $provider->provide(ConflictingDto::class);
     }
+
 }
 
 final class TestContainer implements ContainerInterface
@@ -230,7 +248,7 @@ final class FailingUploadedFile implements UploadedFileInterface
     }
 }
 
-final class CompiledDto
+final class AttributeRulesDto
 {
     #[Required]
     #[Validate('email')]

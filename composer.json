@@ -1,13 +1,12 @@
 {
     "name": "componenta/validation",
-    "description": "Flexible validation library with attribute-based rules, compiled metadata, multiple provider strategies, and comprehensive error handling",
+    "description": "Validation rules, native attributes and declarative validator maps",
     "type": "library",
     "license": "MIT",
     "keywords": [
         "validation",
         "validator",
         "attributes",
-        "compiled-validation",
         "rules",
         "validation-provider",
         "php84"
@@ -15,7 +14,7 @@
     "require": {
         "php": "^8.4",
         "componenta/arrayable": "^1.0",
-        "componenta/config": "^2.0.2 || ^3.0",
+        "componenta/config": "^3.0.0",
         "componenta/mimetype-detector": "^1.0",
         "cycle/database": "^2.15",
         "giggsey/libphonenumber-for-php": "^9.0",
@@ -45,7 +44,7 @@
     "prefer-stable": true,
     "extra": {
         "branch-alias": {
-            "dev-main": "2.x-dev"
+            "dev-main": "3.0.x-dev"
         },
         "componenta": {
             "config-providers": [

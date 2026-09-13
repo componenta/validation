@@ -8,7 +8,7 @@ Validation library for PHP 8.4+. It provides immutable validators, composable ru
 composer require componenta/validation
 ```
 
-For Componenta application discovery and production compilation of validation attributes, also install:
+For Componenta application discovery and generation of production validator factories, also install:
 
 ```bash
 composer require componenta/validation-app
@@ -120,18 +120,17 @@ The referenced identifier is resolved through `ValidatorFactoryInterface::create
 
 ## Development and production providers
 
-The default provider order preserves explicit application configuration:
+The default factory creates CompositeValidationProvider in this order: ValidatableProvider, explicit services in ConfigKey::VALIDATORS_MAP, then AttributeValidationProvider. The core works the same way in every environment.
 
-1. `ValidatableProvider` for `ValidatableInterface`;
-2. `MappedValidationProvider` for `ConfigKey::VALIDATORS_MAP`;
-3. `CompiledValidationProvider` for `ConfigKey::COMPILED_VALIDATORS`;
-4. reflection-based attribute discovery in development only.
+With componenta/validation-app, app:build exports complete validation definitions using the exact built-in Validate, Field and ValidatedBy attributes. The artifact maps class names to field-to-rule strings or validator service names. String literals, class-name expressions and a null Validate::as can be exported without evaluating arguments.
 
-`VALIDATORS_MAP` remains the manual map from entry id to a validator service. `COMPILED_VALIDATORS` is a versioned descriptor map produced by the application integration; it is not a map of generated validator classes.
+Production inserts MapValidationProvider before AttributeValidationProvider. A class with custom attributes, rule objects, dynamic arguments or conflicting declarations is omitted from the map and handled entirely through native attributes. Field determines an alias and has priority over Validate::as; it does not define a rule itself. An absent entry returns null from MapValidationProvider so the composite can delegate to the next provider.
 
-With `componenta/validation-app`, `app:build` scans attribute metadata in development and stores a descriptor map in the application config cache. In production the compiled provider hydrates rules and delegates creation to the ordinary `ValidatorFactoryInterface`, so the standard walker, formatter, locale, custom rule factory, and explicit container factories continue to apply. Validator services referenced by `#[ValidatedBy]` are also contributed as DI v4 autowiring roots. Explicit application factories still win over generated DI factories.
+Each provide() creates rules through the current RuleFactoryInterface and validators through ValidatorFactoryInterface. Native attributes and nested constructor arguments are fresh for each provided validator. Validator services follow their container lifetime. Repeated validate() calls retain the returned validator's own state.
 
-The integration marks the compiled map as required outside development. A missing or incompatible map fails during provider construction rather than silently disabling attribute validation. Re-run `app:build` whenever validation attributes, validator services, rule aliases, or their dependencies change.
+An application factory registration for ValidationProviderInterface, supplied after the package ConfigProviders, replaces the default provider entirely. Its returned provider is used directly, including null results. Existing provider instances can be returned from that factory.
+
+Missing or invalid artifacts fall back to native attributes without starting a build. Configure the path with Componenta\Validation\App\ConfigKey::MAP_FILE. The single generated PHP file and matching source code belong to one deployment.
 
 ## Rule syntax
 
@@ -211,7 +210,6 @@ Register a custom string rule through `RuleFactory::register()` and aliases thro
 | Key | Purpose |
 |---|---|
 | `ConfigKey::VALIDATORS_MAP` | Explicit entry-id to validator-service map. |
-| `ConfigKey::COMPILED_VALIDATORS` | Versioned compiled attribute descriptor map. |
 | `ConfigKey::DICTIONARY` | Custom message dictionary. |
 | `ConfigKey::USED_LOCALES` | Locales whose dictionaries are loaded. |
 | `ConfigKey::DEFAULT_LOCALE` | Default formatter locale. |

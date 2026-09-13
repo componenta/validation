@@ -39,6 +39,11 @@ final class ErrorMessageCollector implements ErrorMessageCollectorInterface
         $existing = $this->_messages[$key];
 
         if ($existing instanceof ErrorMessageCollectorInterface) {
+            if (!$existing instanceof self) {
+                $copy = new self();
+                $copy->merge($existing);
+                $this->_messages[$key] = $existing = $copy;
+            }
             if ($message instanceof ErrorMessageCollectorInterface) {
                 // Collector + Collector -> merge
                 $existing->merge($message);
@@ -79,15 +84,7 @@ final class ErrorMessageCollector implements ErrorMessageCollectorInterface
      */
     public function isEmpty(): bool
     {
-        foreach ($this->_messages as $msg) {
-            if ($msg instanceof ErrorMessageCollectorInterface && !$msg->isEmpty()) {
-                return false;
-            }
-            if ($msg instanceof ErrorMessageInterface) {
-                return false;
-            }
-        }
-        return true;
+        return $this->count() === 0;
     }
 
     /**
@@ -105,12 +102,17 @@ final class ErrorMessageCollector implements ErrorMessageCollectorInterface
      */
     public function count(): int
     {
+        return self::countMessages($this);
+    }
+
+    private static function countMessages(ErrorMessageCollectorInterface $collector): int
+    {
         $count = 0;
-        foreach ($this->_messages as $msg) {
-            if ($msg instanceof ErrorMessageCollectorInterface) {
-                $count += count($msg);
-            } elseif ($msg instanceof ErrorMessageInterface) {
-                $count += 1;
+        foreach ($collector as $message) {
+            if ($message instanceof ErrorMessageCollectorInterface) {
+                $count += self::countMessages($message);
+            } elseif ($message instanceof ErrorMessageInterface) {
+                ++$count;
             }
         }
         return $count;

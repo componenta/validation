@@ -1,51 +1,31 @@
 <?php
-
 declare(strict_types=1);
 
 namespace Componenta\Validation\Provider;
 
-use Componenta\Validation\Definition\AttributeValidatorDefinitionExtractor;
-use Componenta\Validation\Definition\ValidatorDefinitionFactory;
+use Componenta\Validation\Factory\AttributeValidatorFactory;
 use Componenta\Validation\Factory\ValidatorFactoryInterface;
+use Componenta\Validation\Internal\AttributeMetadata;
 use Componenta\Validation\Rule\RuleFactoryInterface;
 use Componenta\Validation\ValidatorInterface;
+use ReflectionClass;
 
-/** Reflection-backed provider intended for development mode. */
-final class AttributeValidationProvider implements ValidationProviderInterface
+/** Provides fresh native attribute rules and resolves #[ValidatedBy] services. */
+final readonly class AttributeValidationProvider implements ValidationProviderInterface
 {
-    /** @var array<string, ValidatorInterface|null> */
-    private array $cache = [];
+    private AttributeValidatorFactory $factory;
 
-    private readonly AttributeValidatorDefinitionExtractor $extractor;
-
-    private readonly ValidatorDefinitionFactory $definitionFactory;
-
-    public function __construct(
-        private readonly ValidatorFactoryInterface $validatorFactory,
-        RuleFactoryInterface $ruleFactory,
-        ?AttributeValidatorDefinitionExtractor $extractor = null,
-    ) {
-        $this->extractor = $extractor ?? new AttributeValidatorDefinitionExtractor();
-        $this->definitionFactory = new ValidatorDefinitionFactory($ruleFactory);
+    public function __construct(ValidatorFactoryInterface $validatorFactory, RuleFactoryInterface $ruleFactory)
+    {
+        $this->factory = new AttributeValidatorFactory($validatorFactory, $ruleFactory);
     }
 
     public function provide(string $entryId): ?ValidatorInterface
     {
-        if (array_key_exists($entryId, $this->cache)) {
-            return $this->cache[$entryId];
-        }
-
         if (!class_exists($entryId)) {
-            return $this->cache[$entryId] = null;
+            return null;
         }
-
-        $definition = $this->extractor->extract($entryId);
-        if ($definition === null || ($definition['kind'] ?? null) !== 'rules') {
-            return $this->cache[$entryId] = null;
-        }
-
-        return $this->cache[$entryId] = $this->validatorFactory->createFrom(
-            $this->definitionFactory->createRules($definition),
-        );
+        $class = new ReflectionClass($entryId);
+        return $this->factory->create($class, AttributeMetadata::inspect($class));
     }
 }

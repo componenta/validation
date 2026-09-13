@@ -26,7 +26,7 @@ interface ValidatorFactoryInterface
      *
      * Creates a validator from an array of rules.
      *
-     * @param array<string, string|RuleInterface> $rules Rule definitions (array of RuleInterface or string syntax)
+     * @param array<array-key, string|RuleInterface> $rules Rule definitions (array of RuleInterface or string syntax)
      * @return ValidatorInterface Validator instance
      */
     public function createFrom(array $rules): ValidatorInterface;

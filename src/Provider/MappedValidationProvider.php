@@ -13,7 +13,7 @@ use Psr\Container\ContainerInterface;
  */
 final class MappedValidationProvider implements ValidationProviderInterface
 {
-    /** @var array<string, class-string<ValidatorInterface>> */
+    /** @var array<string, non-empty-string> */
     private array $validators = [];
 
     /**
@@ -29,14 +29,16 @@ final class MappedValidationProvider implements ValidationProviderInterface
             return null;
         }
 
-        return $this->container->get($this->validators[$entryId]);
+        /** @var ValidatorInterface $validator */
+        $validator = $this->container->get($this->validators[$entryId]);
+        return $validator;
     }
 
     /**
      * Register mapping between entity and validator.
      *
      * @param string $id Entity identifier (typically class name)
-     * @param class-string<ValidatorInterface> $validatorClass Validator class name
+     * @param non-empty-string $validatorClass Validator class name
      */
     public function register(string $id, string $validatorClass): void
     {

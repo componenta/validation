@@ -8,7 +8,7 @@
 composer require componenta/validation
 ```
 
-Для обнаружения атрибутов в Componenta-приложении и их production-компиляции также установите:
+Для обнаружения атрибутов в Componenta-приложении и генерации production-карты валидаторов также установите:
 
 ```bash
 composer require componenta/validation-app
@@ -118,20 +118,19 @@ final class CreateUserCommand
 
 Указанный идентификатор разрешается через `ValidatorFactoryInterface::create()`, обычно из контейнера. Поэтому можно использовать явную фабрику, автоматически собираемый конкретный валидатор или интерфейс/service id, сопоставленный приложением. Одновременное объявление `#[ValidatedBy]` и правил на свойствах неоднозначно и отклоняется вместо молчаливого выбора одного источника.
 
-## Development- и production-провайдеры
+## Провайдеры development и production
 
-Порядок стандартных провайдеров сохраняет приоритет явной конфигурации приложения:
+Стандартная фабрика создаёт CompositeValidationProvider: ValidatableProvider, явная карта сервисов ConfigKey::VALIDATORS_MAP, затем AttributeValidationProvider. Сам пакет работает одинаково во всех окружениях.
 
-1. `ValidatableProvider` для `ValidatableInterface`;
-2. `MappedValidationProvider` для `ConfigKey::VALIDATORS_MAP`;
-3. `CompiledValidationProvider` для `ConfigKey::COMPILED_VALIDATORS`;
-4. reflection-обнаружение атрибутов только в development.
+Пакет componenta/validation-app регистрирует ValidationBuilder в app.builders. Команда app:build экспортирует полностью представимые определения из стандартных Validate, Field и ValidatedBy. Карта содержит «класс → поле → строка правил» либо «класс → имя сервиса валидатора». Без вычисления аргументов экспортируются строковые литералы, выражения имени класса и null для Validate::as.
 
-`VALIDATORS_MAP` остаётся ручной картой `entry id → validator service`. `COMPILED_VALIDATORS` — версионированная карта дескрипторов, создаваемая интеграционным пакетом; это не набор сгенерированных классов валидаторов.
+В production фабрика вставляет MapValidationProvider перед AttributeValidationProvider. Классы с пользовательскими атрибутами, объектами правил, динамическими аргументами или конфликтующими объявлениями целиком обрабатываются через Reflection. Частичная карта для DTO не создаётся. Field задаёт алиас с приоритетом над Validate::as; сам по себе он не добавляет правило. Для отсутствующей записи MapValidationProvider возвращает null, после чего композит обращается к атрибутному провайдеру.
 
-При установленном `componenta/validation-app` команда `app:build` в development сканирует атрибуты и записывает descriptor map в кеш конфигурации приложения. В production compiled provider гидратирует правила и делегирует создание обычному `ValidatorFactoryInterface`, поэтому продолжают применяться стандартные walker, formatter, locale, пользовательская фабрика правил и явные фабрики контейнера. Сервисы из `#[ValidatedBy]` одновременно передаются DI v4 как корни autowiring-компиляции. Явные фабрики приложения имеют приоритет над сгенерированными DI-фабриками.
+Правила создаются через текущую RuleFactoryInterface, валидаторы — через ValidatorFactoryInterface. Каждый provide() создаёт свежие атрибутные правила и их вложенные аргументы. Сервис валидатора сохраняет время жизни из DI. Повторные validate() используют состояние полученного валидатора.
 
-Интеграционный пакет помечает compiled map как обязательную вне development. Отсутствующая или несовместимая карта вызывает ошибку при создании провайдера, а не молча отключает атрибутную валидацию. Повторно запускайте `app:build` после изменения атрибутов, validator services, aliases правил или их зависимостей.
+Приложение заменяет фабрику ValidationProviderInterface через ConfigProvider, зарегистрированный после провайдеров пакетов. Пользовательский провайдер используется целиком, включая возвращаемый им null. Фабрика может вернуть уже существующий экземпляр провайдера.
+
+При отсутствии или повреждении карты работает атрибутный провайдер. Runtime не запускает сборку и не записывает кеш. Путь задаётся Componenta\Validation\App\ConfigKey::MAP_FILE; по умолчанию это var/cache/build/validators.php. Единственный PHP-файл карты развёртывается вместе с соответствующим исходным кодом.
 
 ## Строковый синтаксис правил
 
@@ -211,7 +210,6 @@ final class Uppercase implements RuleInterface
 | Ключ | Назначение |
 |---|---|
 | `ConfigKey::VALIDATORS_MAP` | Явная карта `entry id → validator service`. |
-| `ConfigKey::COMPILED_VALIDATORS` | Версионированная карта скомпилированных дескрипторов атрибутов. |
 | `ConfigKey::DICTIONARY` | Пользовательский словарь сообщений. |
 | `ConfigKey::USED_LOCALES` | Список загружаемых локалей. |
 | `ConfigKey::DEFAULT_LOCALE` | Локаль formatter по умолчанию. |

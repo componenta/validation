@@ -258,24 +258,28 @@ final class RuleFactory implements RuleFactoryInterface
     /** @return non-empty-list<string> */
     private function splitByPipe(string $content): array
     {
-        if (str_starts_with(strtolower($content), 'regex:')) {
-            $regexEnd = $this->findRegexEnd($content, 6);
-            if ($regexEnd === false || $regexEnd >= strlen($content) - 1) {
-                return [$content];
+        $parts = [];
+
+        while (($content = ltrim($content)) !== '') {
+            $separator = strpos($content, '|');
+
+            if (str_starts_with(strtolower($content), 'regex:')) {
+                $regexEnd = $this->findRegexEnd($content, 6);
+                $separator = $regexEnd === false ? false : strpos($content, '|', $regexEnd + 1);
             }
 
-            $regex = substr($content, 0, $regexEnd + 1);
-            $rest = substr($content, $regexEnd + 1);
+            if ($separator === false) {
+                $parts[] = trim($content);
+                break;
+            }
 
-            return str_starts_with($rest, '|')
-                ? [$regex, ...$this->splitByPipe(substr($rest, 1))]
-                : [$content];
+            $part = trim(substr($content, 0, $separator));
+            if ($part !== '') {
+                $parts[] = $part;
+            }
+
+            $content = substr($content, $separator + 1);
         }
-
-        $parts = array_values(array_filter(
-            array_map('trim', explode('|', $content)),
-            static fn (string $part): bool => $part !== '',
-        ));
 
         return $parts === [] ? [''] : $parts;
     }
@@ -296,12 +300,28 @@ final class RuleFactory implements RuleFactoryInterface
             return false;
         }
 
-        $delimiter = $content[$start];
+        $start += strspn($content, " \t\n\r\v\f", $start);
+        if (!isset($content[$start])) {
+            return false;
+        }
+
+        $opening = $content[$start];
+        $closing = match ($opening) {
+            '(' => ')',
+            '[' => ']',
+            '{' => '}',
+            '<' => '>',
+            default => $opening,
+        };
+        $depth = 1;
         $escaped = false;
 
         for ($index = $start + 1, $length = strlen($content); $index < $length; $index++) {
             $character = $content[$index];
-            if ($character === $delimiter && !$escaped) {
+            if (!$escaped && $opening !== $closing && $character === $opening) {
+                $depth++;
+            }
+            if (!$escaped && $character === $closing && --$depth === 0) {
                 while (isset($content[$index + 1])
                     && preg_match('/[imsxADSUXJu]/', $content[$index + 1]) === 1
                 ) {
