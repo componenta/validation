@@ -9,7 +9,7 @@ use Componenta\Validation\ContextInterface;
 use Componenta\Validation\Error\ErrorMessageCollector;
 use Componenta\Validation\Error\ErrorMessageCollectorInterface;
 
-/** Passes when every child rule passes, with Nullable acting as a null bypass marker. */
+/** Validates every constraint unless Nullable or ExcludeIf bypasses the group. */
 final class AllOf implements RuleInterface
 {
     /** @var list<RuleInterface> */
@@ -61,6 +61,12 @@ final class AllOf implements RuleInterface
             return true;
         }
 
+        foreach ($this->rules as $rule) {
+            if ($rule instanceof ExcludeIf && $rule->shouldExclude($context)) {
+                return true;
+            }
+        }
+
         $errors = null;
         $stopFirst = (bool) $context->getAttribute(
             ContextInterface::STOP_ON_FIRST_FAILURE_ATTRIBUTE,
@@ -68,6 +74,10 @@ final class AllOf implements RuleInterface
         );
 
         foreach ($this->rules as $rule) {
+            if ($rule instanceof ExcludeIf) {
+                continue;
+            }
+
             $result = $rule->validate($value, $context);
             if ($result === true) {
                 continue;

@@ -8,7 +8,7 @@ use Componenta\Validation\Context;
 use Componenta\Validation\ContextInterface;
 use Componenta\Validation\Error\ErrorMessageCollectorInterface;
 
-/** Runs child rules in order and returns immediately after the first failure. */
+/** Unless ExcludeIf bypasses the group, runs constraints in order until the first failure. */
 final class Sequential implements RuleInterface
 {
     /** @var non-empty-list<RuleInterface> */
@@ -34,6 +34,16 @@ final class Sequential implements RuleInterface
     public function validate(mixed $value, ContextInterface $context): true|ErrorMessageCollectorInterface
     {
         foreach ($this->rules as $rule) {
+            if ($rule instanceof ExcludeIf && $rule->shouldExclude($context)) {
+                return true;
+            }
+        }
+
+        foreach ($this->rules as $rule) {
+            if ($rule instanceof ExcludeIf) {
+                continue;
+            }
+
             $result = $rule->validate($value, $context);
             if ($result !== true) {
                 return $result;

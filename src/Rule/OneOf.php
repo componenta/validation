@@ -9,7 +9,7 @@ use Componenta\Validation\ContextInterface;
 use Componenta\Validation\Error\ErrorMessageCollector;
 use Componenta\Validation\Error\ErrorMessageCollectorInterface;
 
-/** Passes when at least one child rule passes. */
+/** Passes when ExcludeIf bypasses the group or at least one constraint passes. */
 final class OneOf implements RuleInterface
 {
     /** @var non-empty-list<RuleInterface> */
@@ -34,6 +34,12 @@ final class OneOf implements RuleInterface
 
     public function validate(mixed $value, ContextInterface $context): true|ErrorMessageCollectorInterface
     {
+        foreach ($this->rules as $rule) {
+            if ($rule instanceof ExcludeIf && $rule->shouldExclude($context)) {
+                return true;
+            }
+        }
+
         $stopFirst = (bool) $context->getAttribute(
             ContextInterface::STOP_ON_FIRST_FAILURE_ATTRIBUTE,
             false,
@@ -43,6 +49,10 @@ final class OneOf implements RuleInterface
         $hasConstraint = false;
 
         foreach ($this->rules as $rule) {
+            if ($rule instanceof ExcludeIf) {
+                continue;
+            }
+
             if ($rule instanceof Nullable) {
                 if ($rule($value)) {
                     return true;

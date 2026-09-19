@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Componenta\Validation\Rule;
 
-use Closure;
 use Componenta\Validation\ContextInterface;
 use Componenta\Validation\Error\ErrorMessageCollectorInterface;
 
@@ -18,7 +17,7 @@ use Componenta\Validation\Error\ErrorMessageCollectorInterface;
  * String condition format: "field:value"
  *   - field: name of another field in the validation data
  *   - value: expected value (auto-cast: "true"->bool, "null"->null, numeric->int/float)
- *   - If no colon, field presence is checked (equivalent to "field:true")
+ *   - comparison is strict after converting the expected value
  */
 final class When implements RuleInterface
 {
@@ -45,6 +44,12 @@ final class When implements RuleInterface
             }
 
             [$field, $expected] = explode(':', $condition, 2);
+            $expected = match (strtolower($expected)) {
+                'true' => true,
+                'false' => false,
+                'null' => null,
+                default => is_numeric($expected) ? $expected + 0 : $expected,
+            };
 
             $condition = static function (mixed $value, ContextInterface $context) use ($field, $expected): bool {
                 $data = (array) $context->getAttribute(ContextInterface::VALIDATION_DATA_ATTRIBUTE, []);

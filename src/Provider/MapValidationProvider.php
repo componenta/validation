@@ -13,7 +13,7 @@ use InvalidArgumentException;
  */
 final readonly class MapValidationProvider implements ValidationProviderInterface
 {
-    /** @var array<string, Entry> */
+    /** @var array<string, array{class: string, definition: Entry}> */
     private array $entries;
 
     /** @param array<array-key, mixed> $entries */
@@ -27,18 +27,19 @@ final readonly class MapValidationProvider implements ValidationProviderInterfac
         }
         $normalized = [];
         foreach ($entries as $class => $entry) {
-            $normalized[strtolower(ltrim($class, '\\'))] = $entry;
+            $class = ltrim($class, '\\');
+            $normalized[strtolower($class)] = ['class' => $class, 'definition' => $entry];
         }
         $this->entries = $normalized;
     }
 
     public function provide(string $entryId): ?ValidatorInterface
     {
-        $key = strtolower(ltrim($entryId, '\\'));
+        $key = strtolower(str_starts_with($entryId, '\\') ? substr($entryId, 1) : $entryId);
         if (!array_key_exists($key, $this->entries)) {
             return null;
         }
-        $entry = $this->entries[$key];
+        $entry = $this->entries[$key]['definition'];
         if ($entry === []) {
             return null;
         }
@@ -52,7 +53,7 @@ final readonly class MapValidationProvider implements ValidationProviderInterfac
         if (!is_a($entry, ValidatorInterface::class, true)) {
             throw new InvalidArgumentException(sprintf(
                 '#[ValidatedBy] on "%s" must reference a class or interface implementing %s; got "%s".',
-                $entryId, ValidatorInterface::class, $entry,
+                $this->entries[$key]['class'], ValidatorInterface::class, $entry,
             ));
         }
         return $this->validators->create($entry);

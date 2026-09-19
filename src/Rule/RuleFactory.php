@@ -14,7 +14,7 @@ final class RuleFactory implements RuleFactoryInterface
     /** @var array<string, callable(array): RuleInterface> */
     private array $factories = [];
 
-    /** @var array<string, string> */
+    /** @var array<string, array{target: string, composite: bool}> */
     private array $aliases = [];
 
     /** @var array<string, true> */
@@ -34,31 +34,10 @@ final class RuleFactory implements RuleFactoryInterface
             throw new InvalidArgumentException('Rule definition cannot be empty.');
         }
 
-        $lower = strtolower($definition);
-        foreach ([
-            'allof:' => AllOf::class,
-            'all_of:' => AllOf::class,
-            'oneof:' => OneOf::class,
-            'one_of:' => OneOf::class,
-        ] as $prefix => $composite) {
-            if (!str_starts_with($lower, $prefix)) {
-                continue;
-            }
-
-            $children = array_map(
-                $this->createRule(...),
-                $this->splitCompositeRules(substr($definition, strlen($prefix))),
-            );
-
-            return $composite === AllOf::class
-                ? RuleComposer::all(...$children)
-                : new OneOf(...$children);
-        }
-
-        foreach (['arrayof:', 'array_of:'] as $prefix) {
-            if (str_starts_with($lower, $prefix)) {
-                return new ArrayOf($this->createRule(substr($definition, strlen($prefix))));
-            }
+        $colon = strpos($definition, ':');
+        $name = strtolower($colon === false ? $definition : substr($definition, 0, $colon));
+        if ($colon !== false && $this->isComposite($name)) {
+            return $this->createSingleRule($definition);
         }
 
         $parts = $this->splitByPipe($definition);
@@ -108,10 +87,12 @@ final class RuleFactory implements RuleFactoryInterface
         $this->factories[$name] = $ruleFactory;
         if ($composite) {
             $this->compositeRules[$name] = true;
+        } else {
+            unset($this->compositeRules[$name]);
         }
 
         foreach ($names as $alias) {
-            $this->alias($alias, $name, $composite);
+            $this->alias($alias, $name);
         }
 
         return $this;
@@ -126,10 +107,7 @@ final class RuleFactory implements RuleFactoryInterface
             throw new InvalidArgumentException(sprintf('Unknown rule: "%s"', $target));
         }
 
-        $this->aliases[$alias] = $target;
-        if ($composite || isset($this->compositeRules[$target])) {
-            $this->compositeRules[$alias] = true;
-        }
+        $this->aliases[$alias] = ['target' => $target, 'composite' => $composite];
 
         return $this;
     }
@@ -170,10 +148,6 @@ final class RuleFactory implements RuleFactoryInterface
     {
         $definition = trim($definition);
 
-        if (str_starts_with(strtolower($definition), 'regex:')) {
-            return new Regex(substr($definition, 6));
-        }
-
         $colon = strpos($definition, ':');
         $name = strtolower($colon === false ? $definition : substr($definition, 0, $colon));
         $factory = $this->resolveFactory($name);
@@ -191,35 +165,40 @@ final class RuleFactory implements RuleFactoryInterface
     /** @return callable(array): RuleInterface|null */
     private function resolveFactory(string $name): ?callable
     {
+        return $this->factories[$this->resolveName($name)] ?? null;
+    }
+
+    private function resolveName(string $name): string
+    {
+        return isset($this->factories[$name]) ? $name : ($this->aliases[$name]['target'] ?? $name);
+    }
+
+    private function isComposite(string $name): bool
+    {
         if (isset($this->factories[$name])) {
-            return $this->factories[$name];
+            return isset($this->compositeRules[$name]);
         }
-
-        $target = $this->aliases[$name] ?? null;
-
-        return $target === null ? null : $this->factories[$target] ?? null;
+        $alias = $this->aliases[$name] ?? null;
+        return $alias !== null && ($alias['composite'] || isset($this->compositeRules[$alias['target']]));
     }
 
     /** @return list<RuleInterface|string> */
     private function parseParams(string $content, string $parentRule): array
     {
-        $params = [];
-        $nested = isset($this->compositeRules[$parentRule]);
-
-        foreach ($this->splitByComma($content) as $param) {
-            if ($nested) {
-                $colon = strpos($param, ':');
-                $ruleName = strtolower($colon === false ? $param : substr($param, 0, $colon));
-                if ($ruleName !== '' && !is_numeric($ruleName) && $this->has($ruleName)) {
-                    $params[] = $this->createRule($param);
-                    continue;
-                }
-            }
-
-            $params[] = $param;
+        $name = $this->resolveName($parentRule);
+        if ($name === 'regex') {
+            return [$content];
         }
 
-        return $params;
+        $nested = $this->isComposite($parentRule);
+        if ($nested && in_array($name, ['arrayof', 'array_of'], true)) {
+            return [$this->createRule($content)];
+        }
+        if ($nested) {
+            return array_map($this->createRule(...), $this->splitCompositeRules($content));
+        }
+
+        return $this->splitByComma($content);
     }
 
     /** @return non-empty-list<string> */
@@ -263,9 +242,21 @@ final class RuleFactory implements RuleFactoryInterface
         while (($content = ltrim($content)) !== '') {
             $separator = strpos($content, '|');
 
-            if (str_starts_with(strtolower($content), 'regex:')) {
-                $regexEnd = $this->findRegexEnd($content, 6);
-                $separator = $regexEnd === false ? false : strpos($content, '|', $regexEnd + 1);
+            // A regex can be the child of several nested composite rules.
+            $start = 0;
+            while (($colon = strpos($content, ':', $start)) !== false
+                && ($separator === false || $colon < $separator)
+            ) {
+                $name = strtolower(ltrim(substr($content, $start, $colon - $start)));
+                if ($this->resolveName($name) === 'regex') {
+                    $regexEnd = $this->findRegexEnd($content, $colon + 1);
+                    $separator = $regexEnd === false ? false : strpos($content, '|', $regexEnd + 1);
+                    break;
+                }
+                if (!$this->isComposite($name)) {
+                    break;
+                }
+                $start = $colon + 1;
             }
 
             if ($separator === false) {
@@ -549,6 +540,10 @@ final class RuleFactory implements RuleFactoryInterface
 
     private function toNumber(string $value): int|float
     {
+        if (is_numeric($value)) {
+            return $value + 0;
+        }
+
         return str_contains($value, '.') ? (float) $value : (int) $value;
     }
 
@@ -560,7 +555,7 @@ final class RuleFactory implements RuleFactoryInterface
             $lower === 'true' => true,
             $lower === 'false' => false,
             $lower === 'null' => null,
-            is_numeric($value) => str_contains($value, '.') ? (float) $value : (int) $value,
+            is_numeric($value) => $this->toNumber($value),
             default => $value,
         };
     }
