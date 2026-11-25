@@ -36,7 +36,7 @@ final class DateFormat implements RuleInterface
 
     public function __invoke(mixed $value): bool
     {
-        if (!is_string($value)) {
+        if (!is_string($value) || str_contains($value, "\0")) {
             return false;
         }
 
@@ -62,19 +62,7 @@ final class DateFormat implements RuleInterface
             return $collector;
         }
 
-        $date = DateTimeImmutable::createFromFormat($this->format, $value);
-        $errors = DateTimeImmutable::getLastErrors();
-
-        // Check if date was created and matches the original format
-        if ($date === false || ($errors && ($errors['warning_count'] > 0 || $errors['error_count'] > 0))) {
-            $collector->add($path, new ErrorMessage($context, self::INVALID_FORMAT_MESSAGE_ID, [
-                'format' => $this->format,
-            ]));
-            return $collector;
-        }
-
-        // Verify the formatted date matches the input (catches invalid dates like 2024-02-30)
-        if ($date->format($this->format) !== $value) {
+        if (!$this($value)) {
             $collector->add($path, new ErrorMessage($context, self::INVALID_FORMAT_MESSAGE_ID, [
                 'format' => $this->format,
             ]));

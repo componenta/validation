@@ -26,7 +26,7 @@ final class Uuid implements RuleInterface
     public const string INVALID_UUID_MESSAGE_ID = 'validation.uuid.invalid';
     public const string INVALID_VERSION_MESSAGE_ID = 'validation.uuid.invalid_version';
 
-    private const string PATTERN = '/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i';
+    private const string PATTERN = '/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iD';
     private const string NIL_UUID = '00000000-0000-0000-0000-000000000000';
 
     public string $name {

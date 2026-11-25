@@ -37,7 +37,7 @@ final class AlphaDash implements RuleInterface
         if (!is_string($value)) {
             return false;
         }
-        $pattern = $this->ascii ? '/^[a-zA-Z0-9_-]+$/' : '/^[\p{L}\p{N}_-]+$/u';
+        $pattern = $this->ascii ? '/^[a-zA-Z0-9_-]+$/D' : '/^[\p{L}\p{N}_-]+$/uD';
         return preg_match($pattern, $value) === 1;
     }
 
@@ -53,7 +53,7 @@ final class AlphaDash implements RuleInterface
             return $collector;
         }
 
-        $pattern = $this->ascii ? '/^[a-zA-Z0-9_-]+$/' : '/^[\p{L}\p{N}_-]+$/u';
+        $pattern = $this->ascii ? '/^[a-zA-Z0-9_-]+$/D' : '/^[\p{L}\p{N}_-]+$/uD';
 
         if (!preg_match($pattern, $value)) {
             $collector->add($path, new ErrorMessage($context, self::INVALID_MESSAGE_ID));

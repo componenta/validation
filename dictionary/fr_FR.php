@@ -81,9 +81,14 @@ return [
     'validation.accepted.not_accepted' => 'La valeur doit être acceptée.',
 
     'validation.file_size.not_uploaded_file' => 'La valeur doit être un fichier téléchargé, :type reçu.',
+    'validation.file_size.unknown_size' => 'La taille du fichier n’a pas pu être déterminée.',
     'validation.file_size.too_large' => 'La taille du fichier ne doit pas dépasser :max, :actual reçu.',
     'validation.file_size.too_small' => 'La taille du fichier doit être d\'au moins :min, :actual reçu.',
 
     'validation.mime_type.not_uploaded_file' => 'La valeur doit être un fichier téléchargé, :type reçu.',
+    'validation.mime_type.upload_error' => 'Le chargement a échoué avec le code d’erreur :code.',
     'validation.mime_type.invalid' => 'Le type de fichier :actual n\'est pas autorisé. Types autorisés : :allowed.',
+    'validation.uploaded_file.not_uploaded_file' => 'La valeur doit être un fichier téléchargé, :type reçu.',
+    'validation.uploaded_file.upload_error' => 'Le chargement a échoué avec le code d’erreur :code.',
+    'validation.is_boolean.not_boolean' => 'La valeur doit être booléenne.',
 ];

@@ -30,8 +30,32 @@ final readonly class AttributeValidatorFactory
      */
     public function create(ReflectionClass $class, array $metadata): ?ValidatorInterface
     {
+        $validatedBy = $metadata['validated_by'];
+        if (count($validatedBy) > 1) {
+            throw new InvalidArgumentException(sprintf('Class "%s" declares #[ValidatedBy] more than once.', $class->getName()));
+        }
+        if ($validatedBy !== []) {
+            if ($metadata['properties'] !== []) {
+                throw new InvalidArgumentException(sprintf(
+                    'Class "%s" cannot combine #[ValidatedBy] with property validation attributes.', $class->getName(),
+                ));
+            }
+
+            /** @var ValidatedBy $attribute */
+            $attribute = $class->getAttributes()[$validatedBy[0]]->newInstance();
+            $service = $attribute->validator;
+            self::assertService($service, $class->getName());
+
+            return $this->validators->create($service);
+        }
+
         $fields = [];
         foreach ($metadata['properties'] as $propertyName => $positions) {
+            if (count($positions['field']) > 1) {
+                throw new InvalidArgumentException(sprintf(
+                    'Property "%s::$%s" declares #[Field] more than once.', $class->getName(), $propertyName,
+                ));
+            }
             $attributes = $class->getProperty($propertyName)->getAttributes();
             $instances = [];
             $instance = static function (int $position) use ($attributes, &$instances): object {
@@ -56,11 +80,6 @@ final readonly class AttributeValidatorFactory
                 $fieldRules[] = $rule->buildRule($this->rules);
             }
 
-            if (count($positions['field']) > 1) {
-                throw new InvalidArgumentException(sprintf(
-                    'Property "%s::$%s" declares #[Field] more than once.', $class->getName(), $propertyName,
-                ));
-            }
             $field = $alias ?? $propertyName;
             if ($positions['field'] !== []) {
                 /** @var Field $attribute */
@@ -80,22 +99,6 @@ final readonly class AttributeValidatorFactory
             $fields[$field] = RuleComposer::all(...$fieldRules);
         }
 
-        $validatedBy = $metadata['validated_by'];
-        if (count($validatedBy) > 1) {
-            throw new InvalidArgumentException(sprintf('Class "%s" declares #[ValidatedBy] more than once.', $class->getName()));
-        }
-        if ($fields !== [] && $validatedBy !== []) {
-            throw new InvalidArgumentException(sprintf(
-                'Class "%s" cannot combine #[ValidatedBy] with property validation attributes.', $class->getName(),
-            ));
-        }
-        if ($validatedBy !== []) {
-            /** @var ValidatedBy $attribute */
-            $attribute = $class->getAttributes()[$validatedBy[0]]->newInstance();
-            $service = $attribute->validator;
-            self::assertService($service, $class->getName());
-            return $this->validators->create($service);
-        }
         return $fields === [] ? null : $this->validators->createFrom($fields);
     }
 

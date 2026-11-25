@@ -23,6 +23,7 @@ use Psr\Http\Message\UploadedFileInterface;
 final class FileSize implements RuleInterface
 {
     public const string NOT_UPLOADED_FILE_MESSAGE_ID = 'validation.file_size.not_uploaded_file';
+    public const string UNKNOWN_SIZE_MESSAGE_ID = 'validation.file_size.unknown_size';
     public const string TOO_LARGE_MESSAGE_ID = 'validation.file_size.too_large';
     public const string TOO_SMALL_MESSAGE_ID = 'validation.file_size.too_small';
 
@@ -45,9 +46,9 @@ final class FileSize implements RuleInterface
             return false;
         }
 
-        $size = $value->getSize() ?? 0;
+        $size = $value->getSize();
 
-        return $size >= $this->min && $size <= $this->max;
+        return $size !== null && $size >= $this->min && $size <= $this->max;
     }
 
     public function validate(mixed $value, ContextInterface $context): true|ErrorMessageCollectorInterface
@@ -63,7 +64,13 @@ final class FileSize implements RuleInterface
             return $collector;
         }
 
-        $size = $value->getSize() ?? 0;
+        $size = $value->getSize();
+
+        if ($size === null) {
+            $collector->add($path, new ErrorMessage($context, self::UNKNOWN_SIZE_MESSAGE_ID));
+
+            return $collector;
+        }
 
         if ($size > $this->max) {
             $collector->add($path, new ErrorMessage($context, self::TOO_LARGE_MESSAGE_ID, [
@@ -139,6 +146,7 @@ final class FileSize implements RuleInterface
     {
         return [
             self::NOT_UPLOADED_FILE_MESSAGE_ID => 'The value must be an uploaded file, :type given.',
+            self::UNKNOWN_SIZE_MESSAGE_ID => 'The file size could not be determined.',
             self::TOO_LARGE_MESSAGE_ID => 'File size must not exceed :max, :actual given.',
             self::TOO_SMALL_MESSAGE_ID => 'File size must be at least :min, :actual given.',
         ];

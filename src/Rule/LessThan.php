@@ -58,10 +58,7 @@ final class LessThan implements RuleInterface
             return false;
         }
 
-        $numValue = (float) $value;
-        $numOther = (float) $other;
-
-        return $this->orEqual ? $numValue <= $numOther : $numValue < $numOther;
+        return $this->orEqual ? $value <= $other : $value < $other;
     }
 
     public function validate(mixed $value, ContextInterface $context): true|ErrorMessageCollectorInterface
@@ -77,7 +74,7 @@ final class LessThan implements RuleInterface
         $otherDate = $this->toDateTime($otherValue);
 
         if ($valueDate !== null && $otherDate !== null) {
-            if ($this($value, $otherValue)) {
+            if ($this->orEqual ? $valueDate <= $otherDate : $valueDate < $otherDate) {
                 return true;
             }
 

@@ -10,11 +10,35 @@ use Componenta\Validation\Rule\Regex;
 use Componenta\Validation\Rule\RuleFactory;
 use Componenta\Validation\Validator;
 use DomainException;
+use InvalidArgumentException;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 final class RuleRegistrationTest extends TestCase
 {
+    public function testRuleNamesAreNormalizedAtRegistration(): void
+    {
+        $factory = new RuleFactory();
+        $factory->register(['  Choice  ', ' Pick '], static fn (array $values): In => new In($values));
+
+        self::assertTrue((new Validator(['field' => $factory->createRule('pick:a,b')]))->validate(['field' => 'b']));
+        self::assertTrue($factory->has('choice'));
+    }
+
+    public function testInvalidAliasDoesNotChangeExistingRegistrations(): void
+    {
+        $factory = new RuleFactory();
+
+        try {
+            $factory->register(['required', 'partial_alias', ' '], static fn (): In => new In(['other']));
+            self::fail('The rule registration accepted an empty alias.');
+        } catch (InvalidArgumentException) {
+            self::assertFalse($factory->has('partial_alias'));
+            $validator = new Validator(['field' => $factory->createRule('required')]);
+            self::assertTrue($validator->validate(['field' => 'Ada']));
+        }
+    }
+
     #[DataProvider('regexRules')]
     public function testRegexAliasPreservesTheCompletePattern(string $name, string $pattern, string $accepted, string $rejected): void
     {

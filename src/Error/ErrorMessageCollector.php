@@ -39,19 +39,18 @@ final class ErrorMessageCollector implements ErrorMessageCollectorInterface
         $existing = $this->_messages[$key];
 
         if ($existing instanceof ErrorMessageCollectorInterface) {
-            if (!$existing instanceof self) {
-                $copy = new self();
-                $copy->merge($existing);
-                $this->_messages[$key] = $existing = $copy;
+            if ($existing instanceof self) {
+                $next = clone $existing;
+            } else {
+                $next = new self();
+                $next->merge($existing);
             }
             if ($message instanceof ErrorMessageCollectorInterface) {
-                // Collector + Collector -> merge
-                $existing->merge($message);
+                $next->merge($message);
             } else {
-                // Collector + Message -> add with numeric index
-                $index = count($existing);
-                $existing->add($index, $message);
+                $next->add(count($next), $message);
             }
+            $this->_messages[$key] = $next;
         } else {
             // Existing is ErrorMessageInterface
             $newCollector = new self();

@@ -10,7 +10,10 @@ class ValidationException extends \RuntimeException implements ValidationExcepti
         public readonly ErrorMessageCollectorInterface $errors,
         string $message = 'Validation failed',
     ) {
-        $fields = array_keys($errors->toArray());
+        $fields = [];
+        foreach ($errors as $field => $error) {
+            $fields[] = $field;
+        }
 
         if ($fields !== []) {
             $message .= ': ' . implode(', ', $fields);

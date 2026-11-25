@@ -9,19 +9,22 @@ use Componenta\Validation\Error\ErrorMessageCollectorInterface;
 use Componenta\Validation\Exception\ValidationException;
 use Componenta\Validation\Formatter\MessageFormatter;
 use Componenta\Validation\Formatter\MessageFormatterInterface;
+use Componenta\Validation\Internal\ValidationData;
 use Componenta\Validation\Rule\RuleCollectorInterface;
+use Componenta\Validation\Rule\RuleInterface;
 use Componenta\Validation\Rule\Rules;
 use Componenta\Validation\Walker\Walker;
 use Componenta\Validation\Walker\WalkerInterface;
 use LogicException;
-use Traversable;
 
 final readonly class Validator implements ValidatorInterface
 {
+    /** @var RuleCollectorInterface<RuleInterface> */
     private RuleCollectorInterface $rules;
 
     private MessageFormatterInterface $formatter;
 
+    /** @param iterable<array-key, RuleInterface> $rules */
     public function __construct(
         iterable $rules,
         private WalkerInterface $walker = new Walker(),
@@ -32,6 +35,7 @@ final readonly class Validator implements ValidatorInterface
         $this->formatter = $formatter ?? MessageFormatter::fromDefaults();
     }
 
+    /** @param iterable<array-key, RuleInterface> $rules */
     public function withRules(iterable $rules): self
     {
         return new self($rules, $this->walker, $this->formatter, $this->locale);
@@ -54,7 +58,7 @@ final readonly class Validator implements ValidatorInterface
 
     public function validate(iterable $data, ?ContextInterface $context = null): true|ErrorMessageCollectorInterface
     {
-        $data = self::materialize($data);
+        $data = ValidationData::materialize($data);
         $default = [
             ContextInterface::VALIDATION_RULES_ATTRIBUTE => $this->rules,
             ContextInterface::STOP_ON_FIRST_FAILURE_ATTRIBUTE => false,
@@ -68,6 +72,7 @@ final readonly class Validator implements ValidatorInterface
             ? new Context($default)
             : new Context(array_merge($default, $context->attributes));
         $errors = null;
+        /** @var RuleCollectorInterface<RuleInterface>|iterable<array-key, RuleInterface> $rules */
         $rules = $context->getAttribute(ContextInterface::VALIDATION_RULES_ATTRIBUTE);
 
         if (!$rules instanceof RuleCollectorInterface) {
@@ -83,7 +88,11 @@ final readonly class Validator implements ValidatorInterface
         $throwOnFailure = (bool) $context->getAttribute(ContextInterface::THROW_ON_FAILURE_ATTRIBUTE, false);
         $stopOnFirstFailure = (bool) $context->getAttribute(ContextInterface::STOP_ON_FIRST_FAILURE_ATTRIBUTE, false);
 
-        foreach ($this->walker->walk($data, $rules) as $target) {
+        $targets = $this->walker instanceof Walker
+            ? $this->walker->walkMaterialized($data, $rules)
+            : $this->walker->walk($data, $rules);
+        $nextAttributes = [ContextInterface::VALIDATION_DATA_ATTRIBUTE => $data];
+        foreach ($targets as $target) {
             if ($target->rule === null) {
                 if ($skipMissing) {
                     continue;
@@ -96,8 +105,7 @@ final readonly class Validator implements ValidatorInterface
                 ContextInterface::CURRENT_PATH_ATTRIBUTE => $target->path,
                 ContextInterface::CURRENT_FIELD_ATTRIBUTE => $target->field,
                 ContextInterface::CURRENT_RULE_ATTRIBUTE => $target->rule->name,
-                ContextInterface::VALIDATION_DATA_ATTRIBUTE => $data,
-            ]);
+            ] + $nextAttributes);
             $result = $target->rule->validate($target->value, $context);
 
             if ($result !== true) {
@@ -113,23 +121,22 @@ final readonly class Validator implements ValidatorInterface
                 $errors->merge($result);
             }
 
-            $processedRules = [
-                ...$context->getAttribute(ContextInterface::PROCESSED_RULES_ATTRIBUTE, []),
-                $target->rule->name,
-            ];
-            $processedFields = [
-                ...$context->getAttribute(ContextInterface::PROCESSED_FIELDS_ATTRIBUTE, []),
-                $target->path,
-            ];
-            $context = $context->withAttributes([
+            /** @var iterable<array-key, string> $previousRules */
+            $previousRules = $context->getAttribute(ContextInterface::PROCESSED_RULES_ATTRIBUTE, []);
+            $processedRules = [...$previousRules, $target->rule->name];
+            /** @var iterable<array-key, string> $previousFields */
+            $previousFields = $context->getAttribute(ContextInterface::PROCESSED_FIELDS_ATTRIBUTE, []);
+            $processedFields = [...$previousFields, $target->path];
+            // Carry the completed field into the next snapshot with its current path.
+            $nextAttributes = [
                 ContextInterface::PROCESSED_RULES_ATTRIBUTE => $processedRules,
                 ContextInterface::LAST_PROCESSED_RULE_ATTRIBUTE => $target->rule->name,
                 ContextInterface::PROCESSED_FIELDS_ATTRIBUTE => $processedFields,
                 ContextInterface::LAST_PROCESSED_FIELD_ATTRIBUTE => $target->path,
-            ]);
+            ];
         }
 
-        if ($errors === null || $errors->isEmpty()) {
+        if ($errors === null) {
             return true;
         }
 
@@ -138,19 +145,5 @@ final readonly class Validator implements ValidatorInterface
         }
 
         return $errors;
-    }
-
-    /** @return array<array-key, mixed> */
-    private static function materialize(iterable $data): array
-    {
-        $result = is_array($data) ? $data : iterator_to_array($data);
-
-        foreach ($result as $key => $value) {
-            if (is_array($value) || $value instanceof Traversable) {
-                $result[$key] = self::materialize($value);
-            }
-        }
-
-        return $result;
     }
 }

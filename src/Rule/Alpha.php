@@ -36,7 +36,7 @@ final class Alpha implements RuleInterface
         if (!is_string($value)) {
             return false;
         }
-        $pattern = $this->ascii ? '/^[a-zA-Z]+$/' : '/^[\p{L}]+$/u';
+        $pattern = $this->ascii ? '/^[a-zA-Z]+$/D' : '/^[\p{L}]+$/uD';
         return preg_match($pattern, $value) === 1;
     }
 
@@ -52,7 +52,7 @@ final class Alpha implements RuleInterface
             return $collector;
         }
 
-        $pattern = $this->ascii ? '/^[a-zA-Z]+$/' : '/^[\p{L}]+$/u';
+        $pattern = $this->ascii ? '/^[a-zA-Z]+$/D' : '/^[\p{L}]+$/uD';
 
         if (!preg_match($pattern, $value)) {
             $collector->add($path, new ErrorMessage($context, self::INVALID_MESSAGE_ID));

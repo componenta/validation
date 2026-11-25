@@ -28,6 +28,9 @@ final readonly class MapValidationProvider implements ValidationProviderInterfac
         $normalized = [];
         foreach ($entries as $class => $entry) {
             $class = ltrim($class, '\\');
+            if (is_array($entry)) {
+                $entry = array_map(static fn (string $rule): string => $rule, $entry);
+            }
             $normalized[strtolower($class)] = ['class' => $class, 'definition' => $entry];
         }
         $this->entries = $normalized;

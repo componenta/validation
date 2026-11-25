@@ -17,7 +17,7 @@ interface ValidatorInterface
     /**
      * Validate the given data.
      *
-     * @param iterable $data Input data to validate
+     * @param iterable<array-key, mixed> $data Input data to validate
      * @param ContextInterface|null $context Optional validation context
      * @return true|ErrorMessageCollectorInterface True if valid, error collector otherwise
      * @throws ValidationExceptionInterface When validation fails and THROW_ON_FAILURE_ATTRIBUTE is true

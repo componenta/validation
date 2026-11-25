@@ -7,6 +7,8 @@ namespace Componenta\Validation\Error;
  *
  * Stores validation errors indexed by field paths.
  * Supports nested structure for complex objects and arrays.
+ *
+ * @extends \IteratorAggregate<array-key, ErrorMessageInterface|ErrorMessageCollectorInterface>
  */
 interface ErrorMessageCollectorInterface extends \IteratorAggregate, \Countable
 {
@@ -39,7 +41,7 @@ interface ErrorMessageCollectorInterface extends \IteratorAggregate, \Countable
     /**
      * Convert all errors to nested array structure.
      *
-     * @return array<string, mixed> Nested array of error messages
+     * @return array<array-key, mixed> Nested array of error messages
      */
     public function toArray(): array;
 }

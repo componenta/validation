@@ -12,9 +12,7 @@ use Componenta\Arrayable\Arrayable;
  *
  * @template T of RuleInterface
  *
- * @extends \IteratorAggregate<string, T>
- * @extends \Countable
- * @extends Arrayable<string, T>
+ * @extends \IteratorAggregate<array-key, T>
  */
 interface RuleCollectorInterface extends \IteratorAggregate, \Countable, Arrayable
 {
@@ -30,7 +28,7 @@ interface RuleCollectorInterface extends \IteratorAggregate, \Countable, Arrayab
      * Get rule for given field name.
      *
      * @param string $name Field name
-     * @return RuleInterface Rule instance
+     * @return T Rule instance
      * @throws \OutOfBoundsException When rule does not exist
      */
     public function get(string $name): RuleInterface;
@@ -38,7 +36,7 @@ interface RuleCollectorInterface extends \IteratorAggregate, \Countable, Arrayab
     /**
      * Get all rules as associative array.
      *
-     * @return array<string, RuleInterface> Map of field names to rules
+     * @return array<array-key, T> Map of field names to rules
      */
     public function toArray(): array;
 }

@@ -3,6 +3,7 @@
 namespace Componenta\Validation\Error;
 
 use Componenta\Validation\ContextInterface;
+use Componenta\Validation\Formatter\MessageFormatter;
 use Componenta\Validation\Formatter\MessageFormatterInterface;
 
 /**
@@ -21,8 +22,9 @@ final class ErrorMessage implements ErrorMessageInterface
     public function toString(): string
     {
         if ($this->message === null) {
-            /** @var MessageFormatterInterface $formatter */
+            /** @var MessageFormatterInterface|null $formatter */
             $formatter = $this->context->getAttribute(ContextInterface::MESSAGE_FORMATTER_ATTRIBUTE);
+            $formatter ??= MessageFormatter::fromDefaults();
             $this->message = $formatter->format($this->messageId, $this->placeholders, $this->context);
         }
 

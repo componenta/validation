@@ -3,6 +3,7 @@
 namespace Componenta\Validation\Walker;
 
 use Componenta\Validation\Rule\RuleCollectorInterface;
+use Componenta\Validation\Rule\RuleInterface;
 
 /**
  * Walker interface for traversing data structure with validation rules.
@@ -19,8 +20,8 @@ interface WalkerInterface
      * containing field paths, values, and corresponding rules.
      * Supports wildcards for array validation.
      *
-     * @param iterable<string, mixed> $data Input data to validate
-     * @param RuleCollectorInterface $rules Validation rules (supports wildcards)
+     * @param iterable<array-key, mixed> $data Input data to validate
+     * @param RuleCollectorInterface<RuleInterface> $rules Validation rules (supports wildcards)
      * @return iterable<Target> Validation targets (field path, value, rule)
      */
     public function walk(iterable $data, RuleCollectorInterface $rules): iterable;

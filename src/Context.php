@@ -12,15 +12,16 @@ final class Context implements ContextInterface
     /** @var array<string, mixed> */
     private(set) array $attributes;
 
+    /** @param array<string, mixed> $attributes */
     public function __construct(array $attributes = [])
     {
-        $this->attributes = $attributes;
+        $this->attributes = self::copyAttributes($attributes);
     }
 
     public function withAttributes(array $attributes): ContextInterface
     {
         $new = clone $this;
-        $new->attributes = array_merge($this->attributes, $attributes);
+        $new->attributes = array_merge($this->attributes, self::copyAttributes($attributes));
 
         return $new;
     }
@@ -48,6 +49,21 @@ final class Context implements ContextInterface
     public function getAttribute(string $name, mixed $default = null): mixed
     {
         return $this->attributes[$name] ?? $default;
+    }
+
+    /**
+     * @param array<string, mixed> $attributes
+     * @return array<string, mixed>
+     */
+    private static function copyAttributes(array $attributes): array
+    {
+        // Copy slots by value so explicit references cannot replace stored attributes.
+        $copy = [];
+        foreach ($attributes as $name => $value) {
+            $copy[$name] = $value;
+        }
+
+        return $copy;
     }
 
     // ========================================================================

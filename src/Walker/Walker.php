@@ -4,31 +4,49 @@ declare(strict_types=1);
 
 namespace Componenta\Validation\Walker;
 
+use Componenta\Validation\Internal\RulePathMatcher;
+use Componenta\Validation\Internal\ValidationData;
 use Componenta\Validation\Rule\RuleCollectorInterface;
 use Componenta\Validation\Rule\RuleInterface;
 use Generator;
-use Traversable;
 
 /** Walks actual and missing values for exact and wildcard rule paths. */
 final class Walker implements WalkerInterface
 {
     public function walk(iterable $data, RuleCollectorInterface $rules): Generator
     {
+        yield from $this->walkMaterialized(ValidationData::materialize($data), $rules);
+    }
+
+    /**
+     * @internal Input has already been materialized by the validator.
+     * @param array<array-key, mixed> $data
+     * @param RuleCollectorInterface<RuleInterface> $rules
+     * @return Generator<int, Target>
+     */
+    public function walkMaterialized(array $data, RuleCollectorInterface $rules): Generator
+    {
         $ruleCache = [];
         $yieldedPaths = [];
-        $data = self::materialize($data);
+        $matcher = null;
 
-        yield from $this->walkData($data, $rules, '', $ruleCache, $yieldedPaths);
+        yield from $this->walkData($data, $rules, '', $ruleCache, $yieldedPaths, $matcher);
 
         foreach (array_keys($rules->toArray()) as $pattern) {
+            $pattern = (string) $pattern;
+            if (isset($yieldedPaths[$pattern]) && !str_contains($pattern, '*')) {
+                continue;
+            }
+
             yield from $this->walkMissingPattern(
                 $data,
-                explode('.', $pattern),
+                $matcher?->segments($pattern) ?? explode('.', $pattern),
                 0,
                 '',
                 $rules,
                 $ruleCache,
                 $yieldedPaths,
+                $matcher,
             );
         }
     }
@@ -36,8 +54,9 @@ final class Walker implements WalkerInterface
     /**
      * @param array<array-key, mixed> $data
      * @param RuleCollectorInterface<RuleInterface> $rules
-     * @param array<string, RuleInterface|null> $ruleCache
-     * @param array<string, true> $yieldedPaths
+     * @param array<array-key, RuleInterface|null> $ruleCache
+     * @param array<array-key, true> $yieldedPaths
+     * @return Generator<int, Target>
      */
     private function walkData(
         array $data,
@@ -45,12 +64,13 @@ final class Walker implements WalkerInterface
         string $parentPath,
         array &$ruleCache,
         array &$yieldedPaths,
+        ?RulePathMatcher &$matcher,
     ): Generator
     {
         foreach ($data as $key => $value) {
             $field = (string) $key;
             $path = $parentPath === '' ? $field : $parentPath . '.' . $field;
-            $rule = $this->resolveRule($path, $rules, $ruleCache);
+            $rule = $this->resolveRule($path, $rules, $ruleCache, $matcher);
             $yieldedPaths[$path] = true;
 
             // Containers that only lead to descendant rules are traversal nodes,
@@ -58,23 +78,23 @@ final class Walker implements WalkerInterface
             // SKIP_MISSING_RULES=false behavior for paths such as items.*.sku.
             if ($rule !== null
                 || !is_array($value)
-                || !$this->hasDescendantRule($path, $rules)
+                || !($matcher ??= new RulePathMatcher($rules))->hasDescendant($path)
             ) {
                 yield new Target($field, $path, $rule, $value);
             }
 
             if (is_array($value)) {
-                yield from $this->walkData($value, $rules, $path, $ruleCache, $yieldedPaths);
+                yield from $this->walkData($value, $rules, $path, $ruleCache, $yieldedPaths, $matcher);
             }
         }
     }
 
     /**
-     * @param array<array-key, mixed>|mixed $value
-     * @param list<string> $segments
+     * @param non-empty-list<string> $segments
      * @param RuleCollectorInterface<RuleInterface> $rules
-     * @param array<string, RuleInterface|null> $ruleCache
-     * @param array<string, true> $yieldedPaths
+     * @param array<array-key, RuleInterface|null> $ruleCache
+     * @param array<array-key, true> $yieldedPaths
+     * @return Generator<int, Target>
      */
     private function walkMissingPattern(
         mixed $value,
@@ -84,6 +104,7 @@ final class Walker implements WalkerInterface
         RuleCollectorInterface $rules,
         array &$ruleCache,
         array &$yieldedPaths,
+        ?RulePathMatcher &$matcher,
     ): Generator {
         $segment = $segments[$index] ?? null;
         if ($segment === null) {
@@ -93,16 +114,12 @@ final class Walker implements WalkerInterface
         $last = $index === count($segments) - 1;
 
         if ($segment === '*') {
-            if (!is_array($value)) {
+            if ($last || !is_array($value)) {
                 return;
             }
 
             foreach ($value as $key => $child) {
                 $path = $parentPath === '' ? (string) $key : $parentPath . '.' . $key;
-                if ($last) {
-                    continue;
-                }
-
                 yield from $this->walkMissingPattern(
                     $child,
                     $segments,
@@ -111,6 +128,7 @@ final class Walker implements WalkerInterface
                     $rules,
                     $ruleCache,
                     $yieldedPaths,
+                    $matcher,
                 );
             }
 
@@ -128,6 +146,7 @@ final class Walker implements WalkerInterface
                     $rules,
                     $ruleCache,
                     $yieldedPaths,
+                    $matcher,
                 );
             }
 
@@ -151,17 +170,21 @@ final class Walker implements WalkerInterface
         yield new Target(
             $segments[array_key_last($segments)],
             $missingPath,
-            $this->resolveRule($missingPath, $rules, $ruleCache),
+            $this->resolveRule($missingPath, $rules, $ruleCache, $matcher),
             null,
         );
     }
 
     /**
      * @param RuleCollectorInterface<RuleInterface> $rules
-     * @param array<string, RuleInterface|null> $ruleCache
+     * @param array<array-key, RuleInterface|null> $ruleCache
      */
-    private function resolveRule(string $path, RuleCollectorInterface $rules, array &$ruleCache): ?RuleInterface
-    {
+    private function resolveRule(
+        string $path,
+        RuleCollectorInterface $rules,
+        array &$ruleCache,
+        ?RulePathMatcher &$matcher,
+    ): ?RuleInterface {
         if (array_key_exists($path, $ruleCache)) {
             return $ruleCache[$path];
         }
@@ -170,78 +193,8 @@ final class Walker implements WalkerInterface
             return $ruleCache[$path] = $rules->get($path);
         }
 
-        $pathSegments = explode('.', $path);
-        $best = null;
-        $bestSpecificity = -1;
+        $matcher ??= new RulePathMatcher($rules);
 
-        foreach ($rules->toArray() as $pattern => $candidate) {
-            if (!str_contains($pattern, '*')) {
-                continue;
-            }
-
-            $patternSegments = explode('.', $pattern);
-            if (count($patternSegments) !== count($pathSegments)) {
-                continue;
-            }
-
-            $matches = true;
-            $specificity = 0;
-            foreach ($patternSegments as $index => $segment) {
-                if ($segment === '*') {
-                    continue;
-                }
-
-                if ($segment !== $pathSegments[$index]) {
-                    $matches = false;
-                    break;
-                }
-
-                $specificity++;
-            }
-
-            if ($matches && $specificity > $bestSpecificity) {
-                $best = $candidate;
-                $bestSpecificity = $specificity;
-            }
-        }
-
-        return $ruleCache[$path] = $best;
-    }
-
-    private function hasDescendantRule(string $path, RuleCollectorInterface $rules): bool
-    {
-        $pathSegments = explode('.', $path);
-
-        foreach (array_keys($rules->toArray()) as $pattern) {
-            $patternSegments = explode('.', $pattern);
-            if (count($patternSegments) <= count($pathSegments)) {
-                continue;
-            }
-
-            foreach ($pathSegments as $index => $segment) {
-                $patternSegment = $patternSegments[$index] ?? null;
-                if ($patternSegment !== '*' && $patternSegment !== $segment) {
-                    continue 2;
-                }
-            }
-
-            return true;
-        }
-
-        return false;
-    }
-
-    /** @return array<array-key, mixed> */
-    private static function materialize(iterable $data): array
-    {
-        $result = is_array($data) ? $data : iterator_to_array($data);
-
-        foreach ($result as $key => $value) {
-            if (is_array($value) || $value instanceof Traversable) {
-                $result[$key] = self::materialize($value);
-            }
-        }
-
-        return $result;
+        return $ruleCache[$path] = $matcher->resolveWildcard($path);
     }
 }

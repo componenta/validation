@@ -3,7 +3,9 @@ declare(strict_types=1);
 
 namespace Componenta\Validation\Tests;
 
+use Componenta\Validation\Error\ErrorMessageCollectorInterface;
 use Componenta\Validation\Factory\ValidatorFactory;
+use Componenta\Validation\Factory\ValidatorFactoryInterface;
 use Componenta\Validation\Provider\MapValidationProvider;
 use Componenta\Validation\Rule\Required;
 use Componenta\Validation\Rule\RuleFactory;
@@ -45,6 +47,25 @@ final class MapProviderContractTest extends TestCase
             self::assertTrue($validator->validate(['name' => 'Ada']));
             self::assertSame('validation.required', $validator->validate([])->get('name')->messageId);
         }
+    }
+
+    public function testMapKeepsTheDefinitionValidatedByTheConstructor(): void
+    {
+        $definition = 'required';
+        $rules = new RuleFactory();
+        $validators = $this->createStub(ValidatorFactoryInterface::class);
+        $validators->method('createFrom')->willReturnCallback(static fn (array $fields): Validator => new Validator($fields));
+        $provider = new MapValidationProvider([
+            ApplicationRulesDto::class => ['name' => &$definition],
+        ], $validators, $rules);
+        $definition = 'nullable';
+
+        $validator = $provider->provide(ApplicationRulesDto::class);
+
+        self::assertNotNull($validator);
+        $errors = $validator->validate([]);
+        self::assertInstanceOf(ErrorMessageCollectorInterface::class, $errors);
+        self::assertSame(['name'], array_keys($errors->toArray()));
     }
 
     public function testProvidesRulesAndValidatorServicesWithoutLoadingDtoClasses(): void

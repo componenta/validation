@@ -5,11 +5,11 @@ namespace Componenta\Validation\Rule;
 use OutOfBoundsException;
 
 /**
- * Trait for rule collections implementing RuleCollectionInterface
+ * Trait for rule collections implementing RuleCollectorInterface.
  */
 trait RuleCollector
 {
-    /** @var array<string, RuleInterface> */
+    /** @var array<array-key, RuleInterface> */
     private array $rules = [];
 
     public string $name {
@@ -20,13 +20,13 @@ trait RuleCollector
     }
 
     /**
-     * @param iterable<string, RuleInterface> $rules
+     * @param iterable<array-key, mixed> $rules
      */
     public function __construct(iterable $rules)
     {
         foreach ($rules as $key => $rule) {
             if (!$rule instanceof RuleInterface) {
-                throw new \InvalidArgumentException("Rule at key '$key' must implement PolicyInterface");
+                throw new \InvalidArgumentException("Rule at key '$key' must implement RuleInterface");
             }
             $this->rules[$key] = $rule;
         }
@@ -68,7 +68,7 @@ trait RuleCollector
     }
 
     /**
-     * @return array<string, RuleInterface>
+     * @return array<array-key, RuleInterface>
      */
     public function toArray(): array
     {
@@ -76,7 +76,7 @@ trait RuleCollector
     }
 
     /**
-     * @return \Generator<string, RuleInterface>
+     * @return \Generator<array-key, RuleInterface>
      */
     public function getIterator(): \Generator
     {

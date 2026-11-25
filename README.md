@@ -1,6 +1,6 @@
 # Componenta Validation
 
-Validation library for PHP 8.4+. It provides immutable validators, composable rules, attribute metadata, mapped validators, localized messages, nested and wildcard field paths, and framework-neutral factories.
+Validation library for PHP 8.4+ with Componenta Config 3 or 4. It provides immutable validators, composable rules, attribute metadata, mapped validators, localized messages, nested and wildcard field paths, and framework-neutral factories.
 
 ## Installation
 
@@ -46,7 +46,9 @@ $validator = $factory->createFrom([
 ]);
 ```
 
-`ValidatorInterface::validate()` accepts any iterable. The implementation materializes it once, so arrays, rewindable iterators, and one-shot generators have the same validation semantics. The return value is `true` or `ErrorMessageCollectorInterface`; `ContextInterface::THROW_ON_FAILURE_ATTRIBUTE` changes failures into `ValidationException`.
+`ValidatorInterface::validate()` accepts iterable input, including arrays, rewindable iterators, and one-shot generators. The validator retains a per-call array of values for traversal and cross-field checks. A shared iterable instance is read once per call. Recursive collections raise `InvalidArgumentException`.
+
+The return value is `true` on success or `ErrorMessageCollectorInterface` on failure. `ContextInterface::THROW_ON_FAILURE_ATTRIBUTE` changes validation failures into `ValidationException`.
 
 ## Optional services
 
@@ -116,7 +118,63 @@ final class CreateUserCommand
 }
 ```
 
-The referenced identifier is resolved through `ValidatorFactoryInterface::create()`, normally from the container. It may therefore use an explicit factory, an autowired concrete validator, or an interface/service identifier mapped by the application. Declaring `#[ValidatedBy]` together with property validation rules is ambiguous and is rejected instead of silently choosing one source.
+Pass the name of a class or interface that implements `ValidatorInterface`. `ValidatorFactoryInterface::create()` resolves that name as a service ID, including explicit factories and interface mappings. Use `ConfigKey::VALIDATORS_MAP` for other service IDs. Combining `#[ValidatedBy]` with property validation rules raises `InvalidArgumentException`.
+
+### Field callbacks in PHP 8.5
+
+`#[Callback]` receives the current field value and `ContextInterface` during validation. The callback returns `true` on success or `ErrorMessageCollectorInterface` on failure. A field can declare several `#[Callback]` attributes alongside `#[Validate]`.
+
+```php
+use Componenta\Validation\Attribute\Callback;
+use Componenta\Validation\Attribute\Validate;
+use Componenta\Validation\ContextInterface;
+use Componenta\Validation\Error\ErrorMessageCollectorInterface;
+use Componenta\Validation\Rule\Regex;
+
+final class Invitation
+{
+    #[Validate('required')]
+    #[Callback(self::validateInviteCode(...))]
+    public string $inviteCode;
+
+    private static function validateInviteCode(mixed $value, ContextInterface $context): true|ErrorMessageCollectorInterface
+    {
+        return (new Regex('/\A[A-Z0-9]{6}\z/'))->validate($value, $context);
+    }
+}
+```
+
+### Callable conditions in PHP 8.5
+
+`#[WhenCallback]` accepts a capture-free static closure or a first-class callable. The condition receives the current field value and `ContextInterface` during validation. It returns a boolean to select `then` or `else`.
+
+Each branch accepts a rule string or a validation callback. During validation, a callback receives the current field value and `ContextInterface`. It returns `true` on success or `ErrorMessageCollectorInterface` on failure. Only the selected branch runs. The `else` branch uses `Nullable` by default.
+
+```php
+use Componenta\Validation\Attribute\WhenCallback;
+use Componenta\Validation\ContextInterface;
+use Componenta\Validation\Error\ErrorMessageCollectorInterface;
+use Componenta\Validation\Rule\Email;
+
+final class Publication
+{
+    #[WhenCallback(self::isPublished(...), then: self::validatePublishedEmail(...), else: 'nullable|email')]
+    public ?string $email = null;
+
+    private static function isPublished(mixed $value, ContextInterface $context): bool
+    {
+        $data = $context->getAttribute(ContextInterface::VALIDATION_DATA_ATTRIBUTE, []);
+        return ($data['status'] ?? null) === 'published';
+    }
+
+    private static function validatePublishedEmail(mixed $value, ContextInterface $context): true|ErrorMessageCollectorInterface
+    {
+        return (new Email())->validate($value, $context);
+    }
+}
+```
+
+PHP 8.5.13 fixes scope resolution for first-class callables declared in trait attributes. The native provider handles classes using `#[Callback]` or `#[WhenCallback]` when the application uses a compiled validation map.
 
 ## Development and production providers
 
@@ -167,7 +225,7 @@ exists, unique, allof, oneof, arrayof
 
 `OneOf` always evaluates alternatives until one succeeds. `STOP_ON_FIRST_FAILURE_ATTRIBUTE` controls only which errors are retained when every alternative fails; it does not change logical truth. Composite predicate methods evaluate children through `RuleInterface::validate()`, so custom rules need only implement the published interface.
 
-The stock `file` rule validates upload status before size or MIME access. `MimeType` rejects failed uploads without calling `getStream()`.
+The stock `file` rule validates upload status before size or MIME access. `MimeType` rejects failed uploads without calling `getStream()`. A configured size limit requires the uploaded file to report a size.
 
 ## Custom rules
 

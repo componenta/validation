@@ -65,17 +65,16 @@ final class MessageFormatter implements MessageFormatterInterface
             ));
         }
 
-        $message = $this->dictionary[$locale][$messageId];
         $placeholders += [
             'attribute' => $this->resolveAttributeName($context),
         ];
 
+        $replacements = [];
         foreach ($placeholders as $key => $value) {
-            $replacement = is_scalar($value) ? (string) $value : gettype($value);
-            $message = str_replace(':' . $key, $replacement, $message);
+            $replacements[':' . $key] = is_scalar($value) ? (string) $value : gettype($value);
         }
 
-        return $message;
+        return strtr($this->dictionary[$locale][$messageId], $replacements);
     }
 
     private function resolveAttributeName(ContextInterface $context): string

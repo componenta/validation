@@ -82,9 +82,14 @@ return [
     'validation.accepted.not_accepted' => 'El valor debe ser aceptado.',
 
     'validation.file_size.not_uploaded_file' => 'El valor debe ser un archivo subido, se recibió :type.',
+    'validation.file_size.unknown_size' => 'No se pudo determinar el tamaño del archivo.',
     'validation.file_size.too_large' => 'El tamaño del archivo no debe superar :max, se recibió :actual.',
     'validation.file_size.too_small' => 'El tamaño del archivo debe ser al menos :min, se recibió :actual.',
 
     'validation.mime_type.not_uploaded_file' => 'El valor debe ser un archivo subido, se recibió :type.',
+    'validation.mime_type.upload_error' => 'La carga falló con el código de error :code.',
     'validation.mime_type.invalid' => 'El tipo de archivo :actual no está permitido. Tipos permitidos: :allowed.',
+    'validation.uploaded_file.not_uploaded_file' => 'El valor debe ser un archivo subido, se recibió :type.',
+    'validation.uploaded_file.upload_error' => 'La carga falló con el código de error :code.',
+    'validation.is_boolean.not_boolean' => 'El valor debe ser booleano.',
 ];

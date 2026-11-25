@@ -58,7 +58,13 @@ final class Range implements RuleInterface
         if ($this->isDateRange) {
             $this->minDate = $min !== null ? $this->toDateTime($min) : null;
             $this->maxDate = $max !== null ? $this->toDateTime($max) : null;
+            if (($min !== null && $this->minDate === null) || ($max !== null && $this->maxDate === null)) {
+                throw new \InvalidArgumentException('Date range bounds must be valid dates or Unix timestamps.');
+            }
         } else {
+            if (($min !== null && !self::isOrderedNumber($min)) || ($max !== null && !self::isOrderedNumber($max))) {
+                throw new \InvalidArgumentException('Numeric range bounds must be valid numbers.');
+            }
             $this->minDate = null;
             $this->maxDate = null;
         }
@@ -80,22 +86,9 @@ final class Range implements RuleInterface
             return true;
         }
 
-        if (!is_numeric($value)) {
-            return false;
-        }
-
-        $numericValue = (float) $value;
-        $minNum = $this->min !== null ? (float) $this->min : null;
-        $maxNum = $this->max !== null ? (float) $this->max : null;
-
-        if ($minNum !== null && $numericValue < $minNum) {
-            return false;
-        }
-        if ($maxNum !== null && $numericValue > $maxNum) {
-            return false;
-        }
-
-        return true;
+        return self::isOrderedNumber($value)
+            && ($this->min === null || $value >= $this->min)
+            && ($this->max === null || $value <= $this->max);
     }
 
     public function validate(mixed $value, ContextInterface $context): true|ErrorMessageCollectorInterface
@@ -116,22 +109,19 @@ final class Range implements RuleInterface
         ErrorMessageCollector $collector,
         string $path
     ): true|ErrorMessageCollectorInterface {
-        if (!is_numeric($value)) {
+        if (!self::isOrderedNumber($value)) {
             $collector->add($path, new ErrorMessage($context, self::NOT_NUMERIC_MESSAGE_ID, [
                 'type' => get_debug_type($value),
             ]));
             return $collector;
         }
 
-        $numericValue = (float) $value;
-        $minNum = $this->min !== null ? (float) $this->min : null;
-        $maxNum = $this->max !== null ? (float) $this->max : null;
-
-        $tooSmall = $minNum !== null && $numericValue < $minNum;
-        $tooLarge = $maxNum !== null && $numericValue > $maxNum;
+        $tooSmall = $this->min !== null && $value < $this->min;
+        $tooLarge = $this->max !== null && $value > $this->max;
 
         if ($tooSmall || $tooLarge) {
-            if ($minNum !== null && $maxNum !== null) {
+            $numericValue = $value + 0;
+            if ($this->min !== null && $this->max !== null) {
                 $collector->add($path, new ErrorMessage($context, self::OUT_OF_RANGE_MESSAGE_ID, [
                     'min' => $this->min,
                     'max' => $this->max,
@@ -196,6 +186,12 @@ final class Range implements RuleInterface
         return true;
     }
 
+    /** @phpstan-assert-if-true int|float|numeric-string $value */
+    private static function isOrderedNumber(mixed $value): bool
+    {
+        return is_numeric($value) && (!is_float($value) || !is_nan($value));
+    }
+
     private function isDateValue(mixed $value): bool
     {
         if ($value === null) {
@@ -217,6 +213,10 @@ final class Range implements RuleInterface
         }
         if ($value instanceof DateTimeInterface) {
             return DateTimeImmutable::createFromInterface($value);
+        }
+
+        if (is_int($value)) {
+            return (new DateTimeImmutable())->setTimestamp($value);
         }
         if (is_string($value) && !is_numeric($value)) {
             $timestamp = strtotime($value);

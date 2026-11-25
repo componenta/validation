@@ -81,9 +81,14 @@ return [
     'validation.accepted.not_accepted' => 'Der Wert muss akzeptiert werden.',
 
     'validation.file_size.not_uploaded_file' => 'Der Wert muss eine hochgeladene Datei sein, :type wurde angegeben.',
+    'validation.file_size.unknown_size' => 'Die Dateigröße konnte nicht ermittelt werden.',
     'validation.file_size.too_large' => 'Die Dateigröße darf :max nicht überschreiten, :actual wurde angegeben.',
     'validation.file_size.too_small' => 'Die Dateigröße muss mindestens :min betragen, :actual wurde angegeben.',
 
     'validation.mime_type.not_uploaded_file' => 'Der Wert muss eine hochgeladene Datei sein, :type wurde angegeben.',
+    'validation.mime_type.upload_error' => 'Der Upload ist mit Fehlercode :code fehlgeschlagen.',
     'validation.mime_type.invalid' => 'Der Dateityp :actual ist nicht erlaubt. Erlaubte Typen: :allowed.',
+    'validation.uploaded_file.not_uploaded_file' => 'Der Wert muss eine hochgeladene Datei sein, :type wurde angegeben.',
+    'validation.uploaded_file.upload_error' => 'Der Upload ist mit Fehlercode :code fehlgeschlagen.',
+    'validation.is_boolean.not_boolean' => 'Der Wert muss ein boolescher Wert sein.',
 ];

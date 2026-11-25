@@ -81,8 +81,12 @@ return [
     "validation.is_boolean.not_boolean" => "The value must be a boolean.",
     "validation.accepted.not_accepted" => "The value must be accepted.",
     "validation.file_size.not_uploaded_file" => "The value must be an uploaded file, :type given.",
+    "validation.file_size.unknown_size" => "The file size could not be determined.",
     "validation.file_size.too_large" => "File size must not exceed :max, :actual given.",
     "validation.file_size.too_small" => "File size must be at least :min, :actual given.",
     "validation.mime_type.not_uploaded_file" => "The value must be an uploaded file, :type given.",
+    "validation.mime_type.upload_error" => "Upload failed with error code :code.",
     "validation.mime_type.invalid" => "File type :actual is not allowed. Allowed types: :allowed.",
+    "validation.uploaded_file.not_uploaded_file" => "The value must be an uploaded file, :type given.",
+    "validation.uploaded_file.upload_error" => "Upload failed with error code :code.",
 ];

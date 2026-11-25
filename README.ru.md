@@ -1,6 +1,6 @@
 # Componenta Validation
 
-Библиотека валидации для PHP 8.4+. Она предоставляет неизменяемые валидаторы, композицию правил, метаданные в атрибутах, ручные карты валидаторов, локализованные сообщения, вложенные и wildcard-пути, а также независимые от фреймворка фабрики.
+Библиотека валидации для PHP 8.4+ с Componenta Config 3 или 4. Она предоставляет неизменяемые валидаторы, композицию правил, метаданные в атрибутах, ручные карты валидаторов, локализованные сообщения, вложенные и wildcard-пути, а также независимые от фреймворка фабрики.
 
 ## Установка
 
@@ -46,7 +46,9 @@ $validator = $factory->createFrom([
 ]);
 ```
 
-`ValidatorInterface::validate()` принимает любой iterable. Реализация материализует его один раз, поэтому массивы, перематываемые итераторы и одноразовые генераторы имеют одинаковую семантику. Метод возвращает `true` или `ErrorMessageCollectorInterface`; атрибут контекста `ContextInterface::THROW_ON_FAILURE_ATTRIBUTE` преобразует ошибку в `ValidationException`.
+`ValidatorInterface::validate()` принимает iterable, в том числе массивы, перематываемые итераторы и одноразовые генераторы. Валидатор сохраняет массив значений на время вызова для обхода и межполевых проверок. Общий экземпляр iterable читается один раз за вызов. Рекурсивные коллекции приводят к `InvalidArgumentException`.
+
+Метод возвращает `true` при успехе и `ErrorMessageCollectorInterface` при ошибке. Атрибут контекста `ContextInterface::THROW_ON_FAILURE_ATTRIBUTE` преобразует ошибку валидации в `ValidationException`.
 
 ## Необязательные сервисы
 
@@ -116,7 +118,63 @@ final class CreateUserCommand
 }
 ```
 
-Указанный идентификатор разрешается через `ValidatorFactoryInterface::create()`, обычно из контейнера. Поэтому можно использовать явную фабрику, автоматически собираемый конкретный валидатор или интерфейс/service id, сопоставленный приложением. Одновременное объявление `#[ValidatedBy]` и правил на свойствах неоднозначно и отклоняется вместо молчаливого выбора одного источника.
+Передайте имя класса или интерфейса, реализующего `ValidatorInterface`. `ValidatorFactoryInterface::create()` использует это имя как идентификатор сервиса, в том числе для явной фабрики или зарегистрированного интерфейса. Для других идентификаторов сервиса используйте `ConfigKey::VALIDATORS_MAP`. Сочетание `#[ValidatedBy]` с правилами на свойствах приводит к `InvalidArgumentException`.
+
+### Проверка поля колбэком в PHP 8.5
+
+Колбэк в `#[Callback]` получает текущее значение поля и `ContextInterface` при валидации. Он возвращает `true` при успехе или `ErrorMessageCollectorInterface` при ошибке. На одном поле можно указать несколько `#[Callback]` вместе с `#[Validate]`.
+
+```php
+use Componenta\Validation\Attribute\Callback;
+use Componenta\Validation\Attribute\Validate;
+use Componenta\Validation\ContextInterface;
+use Componenta\Validation\Error\ErrorMessageCollectorInterface;
+use Componenta\Validation\Rule\Regex;
+
+final class Invitation
+{
+    #[Validate('required')]
+    #[Callback(self::validateInviteCode(...))]
+    public string $inviteCode;
+
+    private static function validateInviteCode(mixed $value, ContextInterface $context): true|ErrorMessageCollectorInterface
+    {
+        return (new Regex('/\A[A-Z0-9]{6}\z/'))->validate($value, $context);
+    }
+}
+```
+
+### Условия с callable в PHP 8.5
+
+`#[WhenCallback]` принимает статическое замыкание без захвата переменных или first-class callable. При валидации условие получает значение текущего поля и `ContextInterface`, возвращает `bool` и выбирает ветку `then` или `else`.
+
+В `then` и `else` можно передать строку правил или callback валидации. Callback получает текущее значение и `ContextInterface`. Он возвращает `true` при успехе или `ErrorMessageCollectorInterface` при ошибке. Выполняется только выбранная ветка. По умолчанию ветка `else` использует `Nullable`.
+
+```php
+use Componenta\Validation\Attribute\WhenCallback;
+use Componenta\Validation\ContextInterface;
+use Componenta\Validation\Error\ErrorMessageCollectorInterface;
+use Componenta\Validation\Rule\Email;
+
+final class Publication
+{
+    #[WhenCallback(self::isPublished(...), then: self::validatePublishedEmail(...), else: 'nullable|email')]
+    public ?string $email = null;
+
+    private static function isPublished(mixed $value, ContextInterface $context): bool
+    {
+        $data = $context->getAttribute(ContextInterface::VALIDATION_DATA_ATTRIBUTE, []);
+        return ($data['status'] ?? null) === 'published';
+    }
+
+    private static function validatePublishedEmail(mixed $value, ContextInterface $context): true|ErrorMessageCollectorInterface
+    {
+        return (new Email())->validate($value, $context);
+    }
+}
+```
+
+PHP 8.5.13 исправляет определение области видимости first-class callable в атрибутах трейтов. Для классов с `#[Callback]` или `#[WhenCallback]` приложение использует нативный провайдер даже при наличии скомпилированной карты валидации.
 
 ## Провайдеры development и production
 
@@ -167,7 +225,7 @@ exists, unique, allof, oneof, arrayof
 
 `OneOf` всегда проверяет альтернативы до первого успеха. `STOP_ON_FIRST_FAILURE_ATTRIBUTE` определяет только состав ошибок, когда не прошла ни одна альтернатива, но не меняет логический результат. Predicate-методы композитов проверяют дочерние правила через `RuleInterface::validate()`, поэтому пользовательскому правилу достаточно реализовать опубликованный интерфейс.
 
-Стандартное правило `file` проверяет статус загрузки до размера и MIME. `MimeType` отклоняет ошибочную загрузку, не вызывая `getStream()`.
+Стандартное правило `file` проверяет статус загрузки до размера и MIME. `MimeType` отклоняет ошибочную загрузку без вызова `getStream()`. При заданном ограничении на размер загруженный файл должен сообщать свой размер.
 
 ## Пользовательские правила
 

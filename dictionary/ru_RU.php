@@ -102,9 +102,14 @@ return [
 
     // File
     'validation.file_size.not_uploaded_file' => 'Значение должно быть загруженным файлом, получен :type.',
+    'validation.file_size.unknown_size' => 'Не удалось определить размер файла.',
     'validation.file_size.too_large' => 'Размер файла не должен превышать :max, получен :actual.',
     'validation.file_size.too_small' => 'Размер файла должен быть не менее :min, получен :actual.',
 
     'validation.mime_type.not_uploaded_file' => 'Значение должно быть загруженным файлом, получен :type.',
+    'validation.mime_type.upload_error' => 'Ошибка загрузки файла. Код ошибки :code.',
     'validation.mime_type.invalid' => 'Тип файла :actual не допускается. Допустимые типы: :allowed.',
+    'validation.uploaded_file.not_uploaded_file' => 'Значение должно быть загруженным файлом, получен :type.',
+    'validation.uploaded_file.upload_error' => 'Ошибка загрузки файла. Код ошибки :code.',
+    'validation.is_boolean.not_boolean' => 'Значение должно быть логическим.',
 ];

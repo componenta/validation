@@ -3,17 +3,30 @@ declare(strict_types=1);
 namespace Componenta\Validation\Tests;
 
 use Attribute;
+use Componenta\Validation\Attribute\Validate;
+use Componenta\Validation\Attribute\ValidatedBy;
 use Componenta\Validation\ContextInterface;
 use Componenta\Validation\Error\ErrorMessageCollectorInterface;
 use Componenta\Validation\Factory\ValidatorFactory;
+use Componenta\Validation\Factory\ValidatorFactoryInterface;
 use Componenta\Validation\Provider\AttributeValidationProvider;
 use Componenta\Validation\Rule\RuleFactory;
 use Componenta\Validation\Rule\RuleInterface;
+use Componenta\Validation\ValidatorInterface;
 use PHPUnit\Framework\TestCase;
 use Psr\Container\ContainerInterface;
 
 final class NativeAttributeProviderTest extends TestCase
 {
+    public function testConflictingDeclarationsAreRejectedBeforeConstructingRules(): void
+    {
+        $provider = new AttributeValidationProvider($this->createStub(ValidatorFactoryInterface::class), new RuleFactory());
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('cannot combine #[ValidatedBy] with property validation attributes');
+        $provider->provide(ConflictingValidationDto::class);
+    }
+
     public function testEachProvidedValidatorEvaluatesNativeAttributesOnceWithFreshArguments(): void
     {
         NativeStateRule::$constructions = 0;
@@ -33,6 +46,13 @@ final class NativeAttributeProviderTest extends TestCase
         self::assertTrue($second->validate(['value' => 1]));
         self::assertSame(2, NativeStateRule::$constructions);
     }
+}
+
+#[ValidatedBy(ValidatorInterface::class)]
+final class ConflictingValidationDto
+{
+    #[Validate('unregistered-application-rule')]
+    public string $value;
 }
 final class NativeRuleState
 {

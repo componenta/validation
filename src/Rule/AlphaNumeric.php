@@ -36,7 +36,7 @@ final class AlphaNumeric implements RuleInterface
         if (!is_string($value)) {
             return false;
         }
-        $pattern = $this->ascii ? '/^[a-zA-Z0-9]+$/' : '/^[\p{L}\p{N}]+$/u';
+        $pattern = $this->ascii ? '/^[a-zA-Z0-9]+$/D' : '/^[\p{L}\p{N}]+$/uD';
         return preg_match($pattern, $value) === 1;
     }
 
@@ -52,7 +52,7 @@ final class AlphaNumeric implements RuleInterface
             return $collector;
         }
 
-        $pattern = $this->ascii ? '/^[a-zA-Z0-9]+$/' : '/^[\p{L}\p{N}]+$/u';
+        $pattern = $this->ascii ? '/^[a-zA-Z0-9]+$/D' : '/^[\p{L}\p{N}]+$/uD';
 
         if (!preg_match($pattern, $value)) {
             $collector->add($path, new ErrorMessage($context, self::INVALID_MESSAGE_ID));

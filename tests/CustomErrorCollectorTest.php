@@ -71,4 +71,19 @@ final class CustomErrorCollectorTest extends TestCase
         self::assertTrue($errors->isEmpty());
         self::assertSame(0, count($errors));
     }
+
+    public function testMergingAnotherResultKeepsItsNestedErrorsIntact(): void
+    {
+        $source = new ErrorMessageCollector();
+        $source->add('name', $this->message('first error'));
+        $source->add('name', $this->message('second error'));
+        $original = $source->toArray();
+        $result = new ErrorMessageCollector();
+        $result->merge($source);
+
+        $result->add('name', $this->message('required'));
+
+        self::assertSame($original, $source->toArray());
+        self::assertSame(['name' => ['first error', 'second error', 'required']], $result->toArray());
+    }
 }

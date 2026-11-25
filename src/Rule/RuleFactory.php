@@ -68,7 +68,7 @@ final class RuleFactory implements RuleFactoryInterface
     }
 
     /**
-     * @param string|string[] $names
+     * @param string|array<array-key, mixed> $names A rule name or names starting with the canonical name.
      * @param callable(array): RuleInterface $ruleFactory
      */
     public function register(
@@ -77,13 +77,18 @@ final class RuleFactory implements RuleFactoryInterface
         bool $composite = false,
     ): RuleFactory {
         $names = is_array($names) ? array_values($names) : [$names];
-        $name = array_shift($names);
-
-        if (!is_string($name) || trim($name) === '') {
+        if ($names === []) {
             throw new InvalidArgumentException('Rule name must be a non-empty string.');
         }
 
-        $name = strtolower($name);
+        $names = array_map(static function (mixed $name): string {
+            if (!is_string($name) || trim($name) === '') {
+                throw new InvalidArgumentException('Rule name must be a non-empty string.');
+            }
+
+            return strtolower(trim($name));
+        }, $names);
+        $name = array_shift($names);
         $this->factories[$name] = $ruleFactory;
         if ($composite) {
             $this->compositeRules[$name] = true;
@@ -119,6 +124,7 @@ final class RuleFactory implements RuleFactoryInterface
         return isset($this->factories[$name]) || isset($this->aliases[$name]);
     }
 
+    /** @param array<array-key, mixed> $definitions */
     public function createRules(array $definitions): array
     {
         $rules = [];
@@ -540,11 +546,11 @@ final class RuleFactory implements RuleFactoryInterface
 
     private function toNumber(string $value): int|float
     {
-        if (is_numeric($value)) {
-            return $value + 0;
+        if (!is_numeric($value)) {
+            throw new InvalidArgumentException(sprintf('Invalid numeric bound: "%s".', $value));
         }
 
-        return str_contains($value, '.') ? (float) $value : (int) $value;
+        return $value + 0;
     }
 
     private function castValue(string $value): mixed
