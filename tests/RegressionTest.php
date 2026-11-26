@@ -167,13 +167,13 @@ final class RegressionTest extends TestCase
 
         foreach ([['text/plain', true], ['image/jpeg', false], ['text/*', false]] as [$allowed, $expected]) {
             foreach ([false, true] as $useValidate) {
-                $stream = $this->createMock(StreamInterface::class);
+                $stream = $this->createStub(StreamInterface::class);
                 $stream->method('isReadable')->willReturn(true);
                 $stream->method('isSeekable')->willReturn(false);
                 $stream->method('eof')->willReturnOnConsecutiveCalls(false, true);
                 $stream->method('read')->willReturn('plain text');
 
-                $upload = $this->createMock(UploadedFileInterface::class);
+                $upload = $this->createStub(UploadedFileInterface::class);
                 $upload->method('getError')->willReturn(UPLOAD_ERR_OK);
                 $upload->method('getStream')->willReturn($stream);
 

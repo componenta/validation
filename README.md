@@ -1,6 +1,6 @@
 # Componenta Validation
 
-Validation library for PHP 8.4+ with Componenta Config 3 or 4. It provides immutable validators, composable rules, attribute metadata, mapped validators, localized messages, nested and wildcard field paths, and framework-neutral factories.
+Validation library for PHP 8.4+ with Componenta Config 3 or 4 and MIME Type Detector 1.x or 2.x (2.x requires Config 4). It provides immutable validators, composable rules, attribute metadata, mapped validators, localized messages, nested and wildcard field paths, and framework-neutral factories.
 
 ## Installation
 
@@ -224,6 +224,8 @@ exists, unique, allof, oneof, arrayof
 ```
 
 `OneOf` always evaluates alternatives until one succeeds. `STOP_ON_FIRST_FAILURE_ATTRIBUTE` controls only which errors are retained when every alternative fails; it does not change logical truth. Composite predicate methods evaluate children through `RuleInterface::validate()`, so custom rules need only implement the published interface.
+
+The `mime_type` and `file` rules support MIME Type Detector 2.x's nullable MIME value objects and the 1.x string result contract. MIME restrictions are exact allowlists of type/subtype strings; wildcard patterns are not enabled implicitly. Client-supplied file names and MIME declarations are not used to determine the type. MIME detection is heuristic and does not independently establish upload safety.
 
 The stock `file` rule validates upload status before size or MIME access. `MimeType` rejects failed uploads without calling `getStream()`. A configured size limit requires the uploaded file to report a size.
 

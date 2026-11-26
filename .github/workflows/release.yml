@@ -16,6 +16,10 @@ jobs:
       fail-fast: false
       matrix:
         php: ['8.4', '8.5']
+        pair:
+          - { config: '3', detector: '1' }
+          - { config: '4', detector: '1' }
+          - { config: '4', detector: '2' }
     steps:
       - uses: actions/checkout@v7
       - uses: shivammathur/setup-php@v2
@@ -24,8 +28,14 @@ jobs:
           coverage: none
           tools: composer:v2
       - run: composer validate --strict
-      - run: composer install --no-interaction --prefer-dist
+      - name: Verify published dependency combination
+        run: >-
+          composer update --with="componenta/config:^${{ matrix.pair.config }}.0"
+          --with="componenta/mimetype-detector:^${{ matrix.pair.detector }}.0"
+          --no-interaction --prefer-dist
+      - run: composer show componenta/mimetype-detector
       - run: composer test
+      - run: composer audit --no-dev
 
   publish:
     if: startsWith(github.event.head_commit.message, 'Release v')
