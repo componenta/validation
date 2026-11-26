@@ -15,7 +15,7 @@
         "php": "^8.4",
         "componenta/arrayable": "^1.0",
         "componenta/config": "^3.0 || ^4.0",
-        "componenta/mimetype-detector": "^1.0",
+        "componenta/mimetype-detector": "^1.0 || ^2.0",
         "cycle/database": "^2.15",
         "giggsey/libphonenumber-for-php": "^9.0",
         "psr/container": "^2.0",
@@ -44,7 +44,8 @@
     "prefer-stable": true,
     "extra": {
         "branch-alias": {
-            "dev-main": "3.1.x-dev"
+            "dev-main": "3.1.x-dev",
+            "dev-compat/mimetype-detector-v2": "3.2.x-dev"
         },
         "componenta": {
             "config-providers": [

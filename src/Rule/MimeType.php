@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Componenta\Validation\Rule;
 
 use Attribute;
+use Componenta\Detector\MimeType as DetectedMimeType;
 use Componenta\Detector\MimeTypeDetectorInterface;
 use Componenta\Validation\ContextInterface;
 use Componenta\Validation\Error\ErrorMessage;
@@ -35,7 +36,7 @@ final class MimeType implements RuleInterface
             return false;
         }
 
-        $mimeType = $this->detector->detectMimeType($value->getStream());
+        $mimeType = $this->detect($value);
 
         return $mimeType !== null && in_array($mimeType, $this->allowed, true);
     }
@@ -61,7 +62,7 @@ final class MimeType implements RuleInterface
             return $collector;
         }
 
-        $mimeType = $this->detector->detectMimeType($value->getStream());
+        $mimeType = $this->detect($value);
         if ($mimeType === null || !in_array($mimeType, $this->allowed, true)) {
             $collector->add($path, new ErrorMessage($context, self::INVALID_MIME_TYPE_MESSAGE_ID, [
                 'allowed' => implode(', ', $this->allowed),
@@ -72,6 +73,14 @@ final class MimeType implements RuleInterface
         }
 
         return true;
+    }
+
+    /** Normalize both supported detector result contracts without changing allowlist semantics. */
+    private function detect(UploadedFileInterface $file): ?string
+    {
+        $mime = $this->detector->detectMimeType($file->getStream());
+
+        return $mime instanceof DetectedMimeType ? $mime->value : $mime;
     }
 
     public static function getMessages(): array

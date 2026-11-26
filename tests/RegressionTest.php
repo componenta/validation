@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Componenta\Validation\Tests;
 
-use Componenta\Detector\MimeType as DetectedMimeType;
+use Componenta\Detector\FinfoDetector;
 use Componenta\Detector\MimeTypeDetectorInterface;
 use Componenta\Validation\Attribute\Validate;
 use Componenta\Validation\Attribute\ValidatedBy;
@@ -151,20 +151,45 @@ final class RegressionTest extends TestCase
 
     public function testMimeRuleDoesNotReadStreamAfterUploadFailure(): void
     {
-        $detector = new class implements MimeTypeDetectorInterface {
-            public function detectMimeType(
-                string|StreamInterface $content,
-                bool $asObject = false,
-            ): string|DetectedMimeType|null {
-                return 'text/plain';
-            }
-        };
+        $detector = $this->createMock(MimeTypeDetectorInterface::class);
+        $detector->expects(self::never())->method('detectMimeType');
         $upload = new FailingUploadedFile();
 
         $result = (new MimeType($detector, ['text/plain']))->validate($upload, new Context());
 
         self::assertInstanceOf(ErrorMessageCollectorInterface::class, $result);
         self::assertFalse($upload->streamRequested);
+    }
+
+    public function testMimeRuleAcceptsNativeDetectorResultsAndRejectsNonmatchingTypes(): void
+    {
+        $detector = new FinfoDetector();
+
+        foreach ([['text/plain', true], ['image/jpeg', false], ['text/*', false]] as [$allowed, $expected]) {
+            foreach ([false, true] as $useValidate) {
+                $stream = $this->createMock(StreamInterface::class);
+                $stream->method('isReadable')->willReturn(true);
+                $stream->method('isSeekable')->willReturn(false);
+                $stream->method('eof')->willReturnOnConsecutiveCalls(false, true);
+                $stream->method('read')->willReturn('plain text');
+
+                $upload = $this->createMock(UploadedFileInterface::class);
+                $upload->method('getError')->willReturn(UPLOAD_ERR_OK);
+                $upload->method('getStream')->willReturn($stream);
+
+                $rule = new MimeType($detector, [$allowed]);
+                if ($useValidate) {
+                    $result = $rule->validate($upload, new Context());
+                    if ($expected) {
+                        self::assertTrue($result);
+                    } else {
+                        self::assertInstanceOf(ErrorMessageCollectorInterface::class, $result);
+                    }
+                } else {
+                    self::assertSame($expected, $rule($upload));
+                }
+            }
+        }
     }
 
     public function testAttributeRulesUseTheDefaultValidator(): void
